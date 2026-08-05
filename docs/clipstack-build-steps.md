@@ -39,6 +39,17 @@
   - ⏳ **本地手动验证待你执行**（步骤见 P1 小节「本地手动验证步骤」）：复制 文本/链接/图片/文件 看日志、去重、忽略列表。沙箱无 GUI/剪贴板，无法代跑。
   - ⚠️ macOS 无系统级剪贴板变更事件，采用 300ms changeCount 比对（业界通行，非忙等）；Windows 真事件驱动 `AddClipboardFormatListener` 留待后续。
 
+- **2026-08-05 · P2 持久化与命令层（实现完成，待本地手动验证）**
+  - 新增 `src-tauri/src/models.rs`：ContentType（snake→camel 序列化）、HistoryItem、NewItem、Setting。
+  - 新增 `src-tauri/src/db.rs`：AppDb（Mutex<Connection>）+ DbState（Arc）；`open(app)` 解析 `app_data_dir` 建 `clipstack.db`；`migrate` 建 history/trash/settings/ignored_apps 四表 + 索引；`insert_or_bump`（hash 去重/置顶）、`get_history`（默认 500、置顶优先）、`delete_item`（移入 trash）、`toggle_pin/favorite`、`update_setting/get_settings`、`insert/get_ignored_apps`、`enforce_capacity`（5000 上限）。含 6 项单测。
+  - 新增 `src-tauri/src/commands.rs`：add_item/get_history/delete_item/toggle_pin/toggle_favorite/update_setting/get_settings/add_ignored_app/get_ignored_apps。
+  - 改造 `clipboard.rs`：capture 落库（insert_or_bump）、emit HistoryItem；ContentType 迁移到 models；materialize 拆分 preview/content_text/blob；新增 `ignore_app`。
+  - 改造 `lib.rs`：manage DbState、启动从 DB 加载忽略列表、启动 monitor 时传 db、注册 9 个命令。
+  - 依赖：Cargo.toml 加 `rusqlite = { version = "0.32", features = ["bundled"] }`。
+  - ⚠️ 偏差说明：`ignored_apps` 表用 `name`（小写 app 名）而非规划里的 bundle_id/exec_name——因为 macOS 检测只拿到应用名；忽略列表按名称过滤。
+  - ✅ 构建验证：`cargo check` 0 error；`cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15 项全过（含 P1 9 项 + P2 6 项）。
+  - ⏳ **本地手动验证待你执行**（步骤见 P2 小节「本地手动验证步骤」）：复制内容看落库、查 DB、命令读写、忽略列表持久化。沙箱无 GUI/剪贴板，无法代跑。
+
 ## 通用验证手段（每阶段都跑）
 
 - **Rust**：`cargo test`（单测）、`cargo clippy -D warnings`（零告警）
@@ -111,9 +122,29 @@
 4. 容量上限：超出自动清理最旧条目；删除进 `trash`。
 
 验证标准：
-- [ ] **单测**：`add_item` 后 `get_history` 能按时间倒序返回；`delete_item` 移到 `trash`。
+- [x] **单测**：`insert_or_bump` 后 `get_history` 按时间倒序返回；`delete_item` 移到 `trash`；同 hash 去重复用行并刷新 created_at；容量上限生效；toggle_pin、忽略列表持久化（`cargo test` 已覆盖）。
 - [ ] **手动**：复制若干内容后，DB 文件存在且 `history` 表记录完整（类型/来源/大小/时间正确）。
-- [ ] `get_history` 默认 500 条上限、置顶项排序靠前。
+- [x] `get_history` 默认 500 条上限、置顶项排序靠前（`pin_first=true` ORDER BY is_pinned DESC, created_at DESC）。
+
+### P2 本地手动验证步骤（在桌面执行 `npm run tauri dev`）
+1. **落库验证**：复制几段不同内容（文本 / 链接 / 图片 / 文件），终端出现 `[clipstack] captured ...` 即已落库。
+2. **查库**：打开 `~/Library/Application Support/<bundle_id>/clipstack.db`（用 `sqlite3` 或 DB 工具），`SELECT content_type, source_app, size_bytes, created_at FROM history;` 确认记录完整、时间倒序。
+3. **命令读写**（DevTools 控制台）：
+   ```js
+   const { invoke } = await import('@tauri-apps/api/core');
+   // 拉历史（应含刚才复制的内容，最新在前）
+   await invoke('get_history', { limit: 50 });
+   // 置顶第一条
+   const h = await invoke('get_history', { limit: 1 });
+   await invoke('toggle_pin', { id: h[0].id });
+   // 删除第一条（进 trash）
+   await invoke('delete_item', { id: h[0].id });
+   // 设置 + 读取
+   await invoke('update_setting', { key: 'max_history', value: '2000' });
+   await invoke('get_settings');
+   ```
+   再次查库确认：置顶项 `is_pinned=1`；被删项已不在 `history` 而在 `trash`。
+4. **忽略列表持久化**：`await invoke('add_ignored_app', { name: 'Safari' })`，重启应用后该忽略仍生效（已从 DB 载入）。
 
 ---
 
