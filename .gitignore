@@ -1,0 +1,22 @@
+# ===== ClipStack 项目仓库（根目录：包含 clipstack/ 代码与 docs/ 规划文档） =====
+
+# WorkBuddy 工作区记忆与项目数据（非项目代码，不纳入版本控制）
+.workbuddy/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 编辑器 / IDE
+*.swp
+.idea/
+.vscode/
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 注：node_modules / dist（前端）与 src-tauri/target / src-tauri/gen（Rust）
+#     已由 clipstack/.gitignore 与 clipstack/src-tauri/.gitignore 分别忽略。

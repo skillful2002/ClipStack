@@ -1,0 +1,5 @@
+# Rust / Cargo
+/target/
+
+# 生成的中间文件
+/gen/

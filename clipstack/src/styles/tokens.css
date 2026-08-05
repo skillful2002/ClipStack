@@ -1,0 +1,23 @@
+/* ClipStack 设计 Token —— 与 Ardot 设计稿「ClipStack · 设计系统 Token」保持一致
+ * 命名采用 --cs-* 前缀，避免与第三方样式冲突。
+ */
+:root {
+  /* 色彩 / Color */
+  --cs-bg: #ffffff;
+  --cs-bg-subtle: #f7f8fa;
+  --cs-bg-hover: #f1f2f4;
+  --cs-border: #e6e8eb;
+  --cs-text-primary: #1a1d21;
+  --cs-text-secondary: #6b7280;
+  --cs-text-tertiary: #9ca3af;
+  --cs-accent: #059669;
+  --cs-accent-soft: #ecfdf5;
+
+  /* 圆角 / Radius */
+  --cs-radius-sm: 6px;
+  --cs-radius-md: 10px;
+  --cs-radius-lg: 14px;
+
+  /* 布局 */
+  --cs-sidebar-w: 240px;
+}
