@@ -631,8 +631,12 @@
   }
 }
 
-/* ===== 深色主题（P6）：仅覆盖 Token 变量，组件样式自动适配 ===== */
-[data-theme="dark"] {
+/* ===== 深色主题（P6）：仅覆盖 Token 变量，组件样式自动适配 =====
+ * 注意：必须写成 :root[data-theme="dark"] 而非 [data-theme="dark"]。
+ * 因为 :root（浅色 Token）由 tokens.css 注入，且其导入顺序在 app.css 之后，
+ * 若此处仅用属性选择器（与 :root 同为 0,1,0 特异性），浅色块会因其靠后而覆盖深色，
+ * 导致切换深色/跟随系统均不生效。提升为 :root[...]（0,2,0）可保证无论导入顺序都生效。 */
+:root[data-theme="dark"] {
   --cs-bg: #1a1d21;
   --cs-bg-subtle: #23272e;
   --cs-bg-hover: #2c313a;

@@ -56,25 +56,14 @@ export function SettingsView() {
         /* 插件不可用时静默 */
       }
     })();
-    // 跟随系统主题变化。
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      if (themeRef.current === "system") applyTheme("system");
-    };
-    mq?.addEventListener("change", onChange);
-    return () => mq?.removeEventListener("change", onChange);
+    // 系统主题的实时跟随已由 App 启动时注册的 watchSystemTheme 统一处理，
+    // 此处无需再监听 matchMedia，避免重复订阅与视图关闭后失效的问题。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 用 ref 让媒体查询回调读到最新 theme。
-  const themeRef: { current: Theme } = { current: theme };
-  useEffect(() => {
-    themeRef.current = theme;
-  }, [theme]);
-
   const onThemeChange = async (t: Theme) => {
     setTheme(t);
-    applyTheme(t);
+    void applyTheme(t);
     try {
       await api.updateSetting("theme", t);
     } catch (e) {

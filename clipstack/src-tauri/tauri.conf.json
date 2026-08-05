@@ -19,8 +19,7 @@
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false,
-        "theme": "Light"
+        "fullscreen": false
       }
     ],
     "security": {

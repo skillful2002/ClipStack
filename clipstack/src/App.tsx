@@ -1,6 +1,6 @@
 // P3 · 应用根组件：装配三栏布局，启动时加载历史并订阅实时事件。
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useHistory } from "./store/history";
 import {
   onClipboardChanged,
@@ -8,7 +8,7 @@ import {
   onTrayCopied,
   getSettings,
 } from "./lib/tauri";
-import { applyTheme, type Theme } from "./lib/theme";
+import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
 import { Sidebar } from "./components/Sidebar";
 import { HistoryList } from "./components/HistoryList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -27,21 +27,29 @@ export default function App() {
   const setView = useHistory((s) => s.setView);
   const select = useHistory((s) => s.select);
 
-  // 启动：加载历史、应用已保存主题、订阅剪贴板变更（实时追加到列表顶部）。
+  // 启动：加载历史、应用已保存主题、订阅系统主题变化、订阅剪贴板变更。
+  const themeUnlistenRef = useRef<() => void>(() => {});
   useEffect(() => {
     void load();
     void (async () => {
       try {
         const settings = await getSettings();
         const t = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
-        if (t) applyTheme(t);
+        if (t) await applyTheme(t);
       } catch {
         /* 无主题设置时保持浅色默认 */
+      }
+      // 订阅系统主题变化：仅在「跟随系统」时实时跟随 OS 切换。
+      try {
+        themeUnlistenRef.current = await watchSystemTheme();
+      } catch {
+        /* 不支持时静默 */
       }
     })();
     const unlisten = onClipboardChanged((item) => prepend(item));
     return () => {
       void unlisten.then((fn) => fn());
+      themeUnlistenRef.current();
     };
   }, [load, prepend]);
 
