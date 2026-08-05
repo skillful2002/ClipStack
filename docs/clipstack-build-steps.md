@@ -1,6 +1,6 @@
 # ClipStack 开发步骤与验证清单
 
-> 状态：**开发中（P3 主界面落地完成，待本地手动验证）**
+> 状态：**开发中（P4 托盘/快捷键完成，P5/P6/P7 进行中）**
 > 用途：把 `clipstack-development-plan.md` 拆成可逐步执行、每步带验收标准的开发流程
 > 原则：**每阶段验证通过，才进入下一阶段**
 > 最后确认：基于「Node 22（nvm 管理）已就绪」这一前提进入开发；Rust 工具链为 Tauri 后端必需，开发机需另行安装。
@@ -58,6 +58,15 @@
   - 后端：新增 `copy_item` 命令（arboard `set_text`，文本/链接/代码写回系统剪贴板；图片/文件 P3 暂不支持），注册进 invoke_handler。
   - ✅ 构建验证：前端 `npm run build`（tsc + vite build）成功，60 模块打包；后端 `cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15/15 通过（P1/P2 未受影响）。
   - ⏳ **本地手动验证待你执行**（步骤见 P3 小节「验证标准」）：实时追加、复制写回、置顶/收藏持久、删除、忽略应用。沙箱无 GUI/剪贴板，无法代跑。
+
+- **2026-08-05 · P4 托盘 / 菜单栏 + 全局快捷键（实现完成，待本地手动验证）**
+  - 新增 `src-tauri/src/tray.rs`：托盘图标（复用窗口图标）+ 菜单（最近 5 条历史 + 打开主界面 + 设置 + 退出）；`build_menu`/`refresh_menu`；点击历史项 → `set_clipboard_text` 写回并广播 `tray-copied`；点击打开/设置 → 唤起主窗口并广播 `show-view`。每次 `clipboard-changed` 重建菜单保持常新。
+  - 后端 `lib.rs`：注册 `tauri-plugin-global-shortcut`；`CmdOrCtrl+Shift+V` 切换主窗口可见性（`ShortcutState::Pressed`）；主窗口 `CloseRequested` 改为 `hide()`（常驻托盘不退出）；启动托管 DbState 后构建托盘并订阅刷新。
+  - 后端 `clipboard.rs` 新增 `set_clipboard_text`（arboard `set_text`）；`commands.rs::copy_item` 复用之（去掉直接 Clipboard 依赖）。
+  - 前端：`lib/tauri.ts` 新增 `onShowView`/`onTrayCopied`；`App.tsx` 订阅并处理视图切换与复制回执；`Sidebar` 搜索框加 `id` 供 ⌘K 聚焦。
+  - 依赖：`Cargo.toml` 加 `tray-icon` feature 与 `tauri-plugin-global-shortcut = "2"`。
+  - ✅ 构建验证：后端 `cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15/15 通过（P1/P2 未受影响）；前端 `npm run build` 成功。
+  - ⏳ **本地手动验证待你执行**（见 P4 小节「验证标准」）：点击托盘菜单复制、全局快捷键切换窗口、关闭按钮隐藏而非退出。沙箱无 GUI，无法代跑。
 
 ## 通用验证手段（每阶段都跑）
 

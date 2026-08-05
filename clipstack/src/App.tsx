@@ -2,7 +2,11 @@
 
 import { useEffect } from "react";
 import { useHistory } from "./store/history";
-import { onClipboardChanged } from "./lib/tauri";
+import {
+  onClipboardChanged,
+  onShowView,
+  onTrayCopied,
+} from "./lib/tauri";
 import { Sidebar } from "./components/Sidebar";
 import { HistoryList } from "./components/HistoryList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -16,6 +20,8 @@ export default function App() {
   const view = useHistory((s) => s.view);
   const toast = useHistory((s) => s.toast);
   const setToast = useHistory((s) => s.setToast);
+  const setView = useHistory((s) => s.setView);
+  const select = useHistory((s) => s.select);
 
   // 加载历史 + 订阅剪贴板变更（实时追加到列表顶部）。
   useEffect(() => {
@@ -25,6 +31,31 @@ export default function App() {
       void unlisten.then((fn) => fn());
     };
   }, [load, prepend]);
+
+  // P4：托盘菜单 / 全局快捷键触发的视图切换与复制回执。
+  useEffect(() => {
+    const p1 = onShowView((v) => setView(v === "settings" ? "settings" : "main"));
+    const p2 = onTrayCopied((id) => {
+      select(id);
+      setToast("已复制到剪贴板");
+    });
+    return () => {
+      void p1.then((fn) => fn());
+      void p2.then((fn) => fn());
+    };
+  }, [setView, select, setToast]);
+
+  // P5：⌘K / Ctrl+K 聚焦搜索框。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        document.getElementById("clipstack-search")?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // 提示自动消失。
   useEffect(() => {

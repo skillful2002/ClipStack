@@ -5,7 +5,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use arboard::Clipboard;
 use tauri::State;
 
 use crate::clipboard::MonitorState;
@@ -88,6 +87,5 @@ pub fn copy_item(content_type: ContentType, content_text: String) -> Result<(), 
     if matches!(content_type, ContentType::Image | ContentType::File) {
         return Err("该类型暂不支持一键复制".into());
     }
-    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
-    cb.set_text(content_text).map_err(|e| e.to_string())
+    crate::clipboard::set_clipboard_text(&content_text)
 }

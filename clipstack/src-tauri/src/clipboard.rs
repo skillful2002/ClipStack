@@ -307,6 +307,15 @@ pub fn ignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
     state.lock().unwrap().ignored.insert(name.to_lowercase());
 }
 
+/// 将文本写回系统剪贴板（供「复制」按钮、托盘点击使用）。
+///
+/// 注意：arboard 的 `set_file_list` 为平台私有、`Set` builder 不暴露文件方法，
+/// 故图片 / 文件复制暂不在此支持（前端已对这两类禁用复制按钮）。
+pub fn set_clipboard_text(text: &str) -> Result<(), String> {
+    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set_text(text.to_string()).map_err(|e| e.to_string())
+}
+
 // ===== 平台相关：剪贴板变更检测与来源应用 =====
 
 #[cfg(target_os = "macos")]

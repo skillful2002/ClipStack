@@ -161,6 +161,33 @@ pub fn get_history(conn: &Connection, limit: i64, pin_first: bool) -> rusqlite::
     rows.collect()
 }
 
+/// 读取最近若干条（置顶优先、时间倒序），供托盘菜单展示。
+pub fn get_recent(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<HistoryItem>> {
+    get_history(conn, limit, true)
+}
+
+/// 按 id 读取单条历史（托盘点击复制、命令读取原文等场景）。
+pub fn get_item(conn: &Connection, id: i64) -> rusqlite::Result<HistoryItem> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at \
+         FROM history WHERE id = ?",
+    )?;
+    stmt.query_row([id], |r| {
+        Ok(HistoryItem {
+            id: r.get(0)?,
+            content_type: parse_content_type(r.get::<_, String>(1)?),
+            content_text: r.get(2)?,
+            preview: r.get::<_, String>(2)?,
+            source_app: r.get(3)?,
+            size_bytes: r.get(4)?,
+            hash: r.get(5)?,
+            is_pinned: r.get::<_, i64>(6)? != 0,
+            is_favorite: r.get::<_, i64>(7)? != 0,
+            created_at: r.get(8)?,
+        })
+    })
+}
+
 /// 删除：从 history 移到 trash（保留完整快照 + deleted_at）。
 pub fn delete_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;

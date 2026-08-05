@@ -40,8 +40,9 @@ export function Sidebar() {
       <div className="sidebar-search">
         <SearchIcon size={15} />
         <input
+          id="clipstack-search"
           type="text"
-          placeholder="搜索剪贴板内容…"
+          placeholder="搜索剪贴板内容…  (⌘K)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="搜索"

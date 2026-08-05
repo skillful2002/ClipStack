@@ -52,3 +52,15 @@ export const onClipboardChanged = (
   cb: (item: HistoryItem) => void,
 ): Promise<UnlistenFn> =>
   listen<HistoryItem>("clipboard-changed", (event) => cb(event.payload));
+
+/** 托盘 / 全局快捷键触发的视图切换（"all" 回到主界面，"settings" 打开设置）。 */
+export const onShowView = (
+  cb: (view: "all" | "settings") => void,
+): Promise<UnlistenFn> =>
+  listen<"all" | "settings">("show-view", (event) => cb(event.payload));
+
+/** 托盘菜单点击「复制」后触发：携带被复制条目 id，便于前端选中 + 提示。 */
+export const onTrayCopied = (
+  cb: (id: number) => void,
+): Promise<UnlistenFn> =>
+  listen<{ id: number }>("tray-copied", (event) => cb(event.payload.id));
