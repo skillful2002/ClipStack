@@ -179,6 +179,7 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         is_pinned: false,
         is_favorite: false,
         created_at: timestamp,
+        deleted_at: None,
     })
 }
 

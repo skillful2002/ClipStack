@@ -177,6 +177,39 @@
   font-size: 14px;
 }
 
+/* ===== 回收站工具栏（复用 list-toolbar 布局） ===== */
+.trash-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cs-text-primary);
+}
+
+.trash-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.trash-empty-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-bg);
+  color: var(--cs-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.trash-empty-btn:hover:not(:disabled) {
+  background: var(--cs-bg-hover);
+  color: var(--cs-text-primary);
+}
+
+.trash-empty-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ===== 列表行 ===== */
 .item-row {
   display: flex;

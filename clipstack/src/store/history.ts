@@ -26,9 +26,19 @@ interface HistoryState {
   /** 轻量提示（复制成功 / 错误等），由 App 渲染并在数秒后清除。 */
   toast: string | null;
 
+  /** 回收站条目（与主页 items 隔离，避免 id 冲突）。 */
+  trashItems: HistoryItem[];
+  selectedTrashId: number | null;
+
   load: () => Promise<void>;
+  /** 重新拉取主列表（恢复后保持选中项不丢失）。 */
+  reload: () => Promise<void>;
+  loadTrash: () => Promise<void>;
+  /** 直接替换回收站列表（如清空后）。 */
+  setTrashItems: (items: HistoryItem[]) => void;
   setToast: (msg: string | null) => void;
   select: (id: number | null) => void;
+  selectTrash: (id: number | null) => void;
   setCategory: (c: Category) => void;
   setTimeFilter: (t: TimeFilter) => void;
   setSearch: (s: string) => void;
@@ -37,6 +47,8 @@ interface HistoryState {
   prepend: (item: HistoryItem) => void;
   /** 删除：从列表移除并修正选中项。 */
   remove: (id: number) => void;
+  /** 回收站：从本地列表移除并修正选中项。 */
+  removeTrash: (id: number) => void;
   /** 置顶 / 收藏切换后回写状态（保持置顶优先排序）。 */
   applyToggle: (id: number, field: "isPinned" | "isFavorite", value: boolean) => void;
 }
@@ -58,6 +70,8 @@ export const useHistory = create<HistoryState>((set, get) => ({
   loading: false,
   error: null,
   toast: null,
+  trashItems: [],
+  selectedTrashId: null,
 
   load: async () => {
     set({ loading: true, error: null });
@@ -82,7 +96,52 @@ export const useHistory = create<HistoryState>((set, get) => ({
     }
   },
 
+  // 重新拉取主列表，保留当前选中项（若存在），用于恢复条目后刷新。
+  reload: async () => {
+    set({ loading: true, error: null });
+    try {
+      let limit = 1000;
+      try {
+        const settings = await api.getSettings();
+        const mh = Number(settings.find((s) => s.key === "max_history")?.value);
+        if (mh > 0) limit = mh;
+      } catch {
+        /* 设置读取失败时回退默认 */
+      }
+      const items = await api.getHistory(limit);
+      const prev = get().selectedId;
+      set({
+        items: sortItems(items),
+        loading: false,
+        selectedId:
+          prev != null && items.some((i) => i.id === prev)
+            ? prev
+            : (items[0]?.id ?? null),
+      });
+    } catch (e) {
+      set({ error: String(e), loading: false });
+    }
+  },
+
+  // 读取回收站（按删除时间倒序）。
+  loadTrash: async () => {
+    set({ loading: true, error: null });
+    try {
+      const items = await api.getTrash();
+      set({
+        trashItems: items,
+        loading: false,
+        selectedTrashId: items[0]?.id ?? null,
+      });
+    } catch (e) {
+      set({ error: String(e), loading: false });
+    }
+  },
+
   select: (id) => set({ selectedId: id }),
+  selectTrash: (id) => set({ selectedTrashId: id }),
+  setTrashItems: (items) =>
+    set({ trashItems: items, selectedTrashId: items[0]?.id ?? null }),
   setCategory: (category) => set({ category }),
   setTimeFilter: (timeFilter) => set({ timeFilter }),
   setSearch: (search) => set({ search }),
@@ -103,6 +162,17 @@ export const useHistory = create<HistoryState>((set, get) => ({
       items: sortItems(items),
       selectedId:
         get().selectedId === id ? (items[0]?.id ?? null) : get().selectedId,
+    });
+  },
+
+  removeTrash: (id) => {
+    const trashItems = get().trashItems.filter((i) => i.id !== id);
+    set({
+      trashItems,
+      selectedTrashId:
+        get().selectedTrashId === id
+          ? (trashItems[0]?.id ?? null)
+          : get().selectedTrashId,
     });
   },
 

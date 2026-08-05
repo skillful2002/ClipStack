@@ -18,6 +18,8 @@ export interface HistoryItem {
   isFavorite: boolean;
   /** 毫秒时间戳。 */
   createdAt: number;
+  /** 删除时间（仅回收站条目有值，主列表为 undefined）。 */
+  deletedAt?: number;
 }
 
 /** 设置项（key / value 均为字符串）。 */

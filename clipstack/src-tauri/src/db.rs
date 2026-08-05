@@ -156,6 +156,7 @@ pub fn get_history(conn: &Connection, limit: i64, pin_first: bool) -> rusqlite::
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
             created_at: r.get(8)?,
+            deleted_at: None,
         })
     })?;
     rows.collect()
@@ -184,6 +185,7 @@ pub fn get_item(conn: &Connection, id: i64) -> rusqlite::Result<HistoryItem> {
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
             created_at: r.get(8)?,
+            deleted_at: None,
         })
     })
 }
@@ -200,6 +202,57 @@ pub fn delete_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     )?;
     tx.execute("DELETE FROM history WHERE id = ?", [id])?;
     tx.commit()
+}
+
+/// 读取回收站：按删除时间倒序。
+pub fn get_trash(conn: &Connection) -> rusqlite::Result<Vec<HistoryItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at \
+         FROM trash ORDER BY deleted_at DESC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(HistoryItem {
+            id: r.get(0)?,
+            content_type: parse_content_type(r.get::<_, String>(1)?),
+            content_text: r.get(2)?,
+            preview: r.get::<_, String>(2)?,
+            source_app: r.get(3)?,
+            size_bytes: r.get(4)?,
+            hash: r.get(5)?,
+            is_pinned: r.get::<_, i64>(6)? != 0,
+            is_favorite: r.get::<_, i64>(7)? != 0,
+            created_at: r.get(8)?,
+            deleted_at: Some(r.get(9)?),
+        })
+    })?;
+    rows.collect()
+}
+
+/// 恢复：从 trash 移回 history（重置置顶/收藏，created_at 取当前时间以置顶最新）。
+/// 不保留原 id，由 history 自增分配，避免与现有行冲突。
+pub fn restore_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    let now = now_ms();
+    tx.execute(
+        "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at) \
+         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, 0, 0, ? \
+         FROM trash WHERE id = ?",
+        params![now, id],
+    )?;
+    tx.execute("DELETE FROM trash WHERE id = ?", [id])?;
+    tx.commit()
+}
+
+/// 彻底删除：从 trash 永久移除单条。
+pub fn purge_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM trash WHERE id = ?", [id])?;
+    Ok(())
+}
+
+/// 清空回收站：删除全部。
+pub fn empty_trash(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM trash", [])?;
+    Ok(())
 }
 
 /// 切换置顶，返回切换后的状态（id 不存在返回 false）。
@@ -371,5 +424,54 @@ mod tests {
         insert_ignored_app(&c, "Safari").unwrap();
         let list = get_ignored_apps(&c).unwrap();
         assert_eq!(list, vec!["safari".to_string()]);
+    }
+
+    #[test]
+    fn get_trash_returns_deleted() {
+        let mut c = mem_db();
+        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        delete_item(&mut c, id).unwrap();
+        let trash = get_trash(&c).unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].hash, "a");
+    }
+
+    #[test]
+    fn restore_moves_back_to_history() {
+        let mut c = mem_db();
+        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        delete_item(&mut c, id).unwrap();
+        restore_item(&mut c, id).unwrap();
+        assert_eq!(get_history(&c, 100, true).unwrap().len(), 1);
+        let trash_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 0);
+    }
+
+    #[test]
+    fn purge_removes_from_trash() {
+        let mut c = mem_db();
+        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        delete_item(&mut c, id).unwrap();
+        purge_item(&mut c, id).unwrap();
+        let trash_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 0);
+    }
+
+    #[test]
+    fn empty_trash_clears_all() {
+        let mut c = mem_db();
+        let a = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let b = insert_or_bump(&c, &sample("b", 200)).unwrap();
+        delete_item(&mut c, a).unwrap();
+        delete_item(&mut c, b).unwrap();
+        empty_trash(&c).unwrap();
+        let trash_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 0);
     }
 }

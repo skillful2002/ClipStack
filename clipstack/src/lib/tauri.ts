@@ -16,6 +16,21 @@ export const getHistory = (limit?: number): Promise<HistoryItem[]> =>
 export const deleteItem = (id: number): Promise<void> =>
   invoke<void>("delete_item", { id });
 
+/** 读取回收站（按删除时间倒序）。 */
+export const getTrash = (): Promise<HistoryItem[]> =>
+  invoke<HistoryItem[]>("get_trash");
+
+/** 恢复：从回收站移回历史。 */
+export const restoreItem = (id: number): Promise<void> =>
+  invoke<void>("restore_item", { id });
+
+/** 彻底删除：从回收站永久移除。 */
+export const purgeItem = (id: number): Promise<void> =>
+  invoke<void>("purge_item", { id });
+
+/** 清空回收站。 */
+export const emptyTrash = (): Promise<void> => invoke<void>("empty_trash");
+
 /** 切换置顶，返回切换后状态。 */
 export const togglePin = (id: number): Promise<boolean> =>
   invoke<boolean>("toggle_pin", { id });

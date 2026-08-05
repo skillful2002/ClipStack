@@ -33,6 +33,34 @@ pub fn delete_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
     db::delete_item(&mut conn, id).map_err(|e| e.to_string())
 }
 
+/// 读取回收站（按删除时间倒序）。
+#[tauri::command]
+pub fn get_trash(db: State<'_, DbState>) -> Result<Vec<HistoryItem>, String> {
+    let conn = db.lock();
+    db::get_trash(&conn).map_err(|e| e.to_string())
+}
+
+/// 恢复：从回收站移回历史。
+#[tauri::command]
+pub fn restore_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let mut conn = db.lock();
+    db::restore_item(&mut conn, id).map_err(|e| e.to_string())
+}
+
+/// 彻底删除：从回收站永久移除。
+#[tauri::command]
+pub fn purge_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
+    let mut conn = db.lock();
+    db::purge_item(&mut conn, id).map_err(|e| e.to_string())
+}
+
+/// 清空回收站。
+#[tauri::command]
+pub fn empty_trash(db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.lock();
+    db::empty_trash(&conn).map_err(|e| e.to_string())
+}
+
 /// 切换置顶，返回切换后状态。
 #[tauri::command]
 pub fn toggle_pin(db: State<'_, DbState>, id: i64) -> Result<bool, String> {

@@ -13,13 +13,15 @@ import { Sidebar } from "./components/Sidebar";
 import { HistoryList } from "./components/HistoryList";
 import { DetailPanel } from "./components/DetailPanel";
 import { SettingsView } from "./components/SettingsView";
-import { TrashPlaceholder } from "./components/TrashPlaceholder";
+import { TrashView } from "./components/TrashView";
+import { TrashDetail } from "./components/TrashDetail";
 import "./styles/app.css";
 
 export default function App() {
   const load = useHistory((s) => s.load);
   const prepend = useHistory((s) => s.prepend);
   const view = useHistory((s) => s.view);
+  const loadTrash = useHistory((s) => s.loadTrash);
   const toast = useHistory((s) => s.toast);
   const setToast = useHistory((s) => s.setToast);
   const setView = useHistory((s) => s.setView);
@@ -68,6 +70,11 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // 进入回收站视图时拉取已删除条目。
+  useEffect(() => {
+    if (view === "trash") void loadTrash();
+  }, [view, loadTrash]);
+
   // 提示自动消失。
   useEffect(() => {
     if (!toast) return;
@@ -86,7 +93,12 @@ export default function App() {
           </>
         )}
         {view === "settings" && <SettingsView />}
-        {view === "trash" && <TrashPlaceholder />}
+        {view === "trash" && (
+          <>
+            <TrashView />
+            <TrashDetail />
+          </>
+        )}
       </main>
       {toast && <div className="toast">{toast}</div>}
     </div>

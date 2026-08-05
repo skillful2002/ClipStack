@@ -60,6 +60,9 @@ pub struct HistoryItem {
     pub is_favorite: bool,
     /// 毫秒时间戳。
     pub created_at: i64,
+    /// 删除时间（仅回收站条目有值；主列表为 None，以便同一结构体复用）。
+    #[serde(default)]
+    pub deleted_at: Option<i64>,
 }
 
 /// 新增条目入参（命令 `add_item` 与监控线程内部共用）。
