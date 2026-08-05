@@ -49,6 +49,7 @@ pub fn run() {
             commands::get_settings,
             commands::add_ignored_app,
             commands::get_ignored_apps,
+            commands::copy_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipStack");

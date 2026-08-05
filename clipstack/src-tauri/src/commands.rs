@@ -5,11 +5,12 @@
 
 use std::sync::{Arc, Mutex};
 
+use arboard::Clipboard;
 use tauri::State;
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState, DEFAULT_LIMIT};
-use crate::models::{HistoryItem, NewItem, Setting};
+use crate::models::{ContentType, HistoryItem, NewItem, Setting};
 
 /// 新增条目（手动添加 / 前端回写场景）。返回新行 id。
 #[tauri::command]
@@ -78,4 +79,15 @@ pub fn add_ignored_app(
 pub fn get_ignored_apps(db: State<'_, DbState>) -> Result<Vec<String>, String> {
     let conn = db.lock();
     db::get_ignored_apps(&conn).map_err(|e| e.to_string())
+}
+
+/// 一键复制：将条目内容写回系统剪贴板（文本 / 链接 / 代码）。
+/// 图片 / 文件因需二进制解析与平台文件 API，P3 暂不支持。
+#[tauri::command]
+pub fn copy_item(content_type: ContentType, content_text: String) -> Result<(), String> {
+    if matches!(content_type, ContentType::Image | ContentType::File) {
+        return Err("该类型暂不支持一键复制".into());
+    }
+    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set_text(content_text).map_err(|e| e.to_string())
 }

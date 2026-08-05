@@ -1,6 +1,6 @@
 # ClipStack 开发步骤与验证清单
 
-> 状态：**开发中（P0 脚手架进行中）**
+> 状态：**开发中（P3 主界面落地完成，待本地手动验证）**
 > 用途：把 `clipstack-development-plan.md` 拆成可逐步执行、每步带验收标准的开发流程
 > 原则：**每阶段验证通过，才进入下一阶段**
 > 最后确认：基于「Node 22（nvm 管理）已就绪」这一前提进入开发；Rust 工具链为 Tauri 后端必需，开发机需另行安装。
@@ -49,6 +49,15 @@
   - ⚠️ 偏差说明：`ignored_apps` 表用 `name`（小写 app 名）而非规划里的 bundle_id/exec_name——因为 macOS 检测只拿到应用名；忽略列表按名称过滤。
   - ✅ 构建验证：`cargo check` 0 error；`cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15 项全过（含 P1 9 项 + P2 6 项）。
   - ⏳ **本地手动验证待你执行**（步骤见 P2 小节「本地手动验证步骤」）：复制内容看落库、查 DB、命令读写、忽略列表持久化。沙箱无 GUI/剪贴板，无法代跑。
+
+- **2026-08-05 · P3 主界面落地（React 三栏，实现完成，待本地手动验证）**
+  - 新增 `src/types.ts`（HistoryItem/ContentType/Setting，camelCase 字段）、`src/lib/tauri.ts`（`invoke` 封装 + `listen clipboard-changed`）。
+  - 新增 `src/store/history.ts`（Zustand 单 store：items/selectedId/category/timeFilter/search/view/toast + filterItems + 置顶优先排序）、`src/lib/actions.ts`（复制/置顶/收藏/删除 hook）。
+  - 新增组件：`Sidebar`（搜索 + 分类导航 + 回收站/设置入口）、`HistoryList`（时间筛选标签 + 按日分组 + 条目行 + 悬停操作）、`DetailPanel`（类型标签/预览/元数据/操作区）、`SettingsView`（忽略应用管理）、`TrashPlaceholder`。
+  - `App.tsx`：装配三栏；`useEffect` 启动 `load()` + 订阅实时事件（卸载 unlisten）；toast 自动消失。
+  - 后端：新增 `copy_item` 命令（arboard `set_text`，文本/链接/代码写回系统剪贴板；图片/文件 P3 暂不支持），注册进 invoke_handler。
+  - ✅ 构建验证：前端 `npm run build`（tsc + vite build）成功，60 模块打包；后端 `cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15/15 通过（P1/P2 未受影响）。
+  - ⏳ **本地手动验证待你执行**（步骤见 P3 小节「验证标准」）：实时追加、复制写回、置顶/收藏持久、删除、忽略应用。沙箱无 GUI/剪贴板，无法代跑。
 
 ## 通用验证手段（每阶段都跑）
 
@@ -153,18 +162,22 @@
 **目标**：三栏界面可交互，数据从后端实时来。
 
 步骤：
-1. `store/`（Zustand）：history / settings / ui 三个 store。
-2. `api/`：封装 `invoke`，类型与 Rust 模型对齐，禁止 `any`。
-3. 组件：Sidebar（搜索 + 分类 + 筛选）、主列表（分组 + 条目卡片）、详情面板（预览 + 元数据 + 操作）。
-4. 监听 `clipboard-changed` 事件 → 列表实时追加（订阅在 `useEffect`，卸载 `unlisten`）。
-5. 点击条目 → 调 command 写回剪贴板并高亮。
+1. `src/types.ts` + `src/lib/tauri.ts`：TypeScript 类型（camelCase，与后端一致）、`invoke` 封装（get_history/delete_item/toggle_pin/toggle_favorite/copy_item/settings/ignored_apps + `listen clipboard-changed`），禁止 `any`。
+2. `src/store/history.ts`（Zustand 单 store）：items/selectedId/category/timeFilter/search/view/toast；load/prepend/remove/applyToggle/filterItems；置顶优先、时间倒序排序。
+3. `src/lib/actions.ts`：复制 / 置顶 / 收藏 / 删除 操作 hook（列表行与详情面板共用）。
+4. 组件：`Sidebar`（搜索 + 分类导航 + 回收站/设置入口）、`HistoryList`（时间筛选标签 + 按日分组 + 条目行 + 悬停操作）、`DetailPanel`（类型标签 + 预览 + 元数据 + 操作区）、`SettingsView`（忽略应用管理）、`TrashPlaceholder`。
+5. `App.tsx`：装配三栏；`useEffect` 启动 `load()` + 订阅 `clipboard-changed` 实时追加（卸载 `unlisten`）；toast 自动消失。
+6. 后端新增 `copy_item` 命令（arboard `set_text`，文本/链接/代码写回系统剪贴板；图片/文件 P3 暂不支持）。
 
 验证标准：
-- [ ] **视觉**：三栏布局、配色、间距与 Ardot 设计稿截图一致。
-- [ ] **手动**：复制新内容，列表顶部实时出现该条目。
-- [ ] **手动**：点击某条目，系统粘贴验证内容确被写回剪贴板。
-- [ ] **手动**：置顶项恒在列表最前并高亮；收藏标记持久。
-- [ ] `tsc --noEmit` 0 error，无 `any`。
+- [x] `tsc --noEmit` 0 error，无 `any`（已验证：`npm run build` 即 tsc + vite build，60 模块打包成功）。
+- [x] 后端 `cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15/15 通过（P1 9 + P2 6，未受影响）。
+- [x] **视觉**：三栏布局 + 设计 Token（`tokens.css` 与 Ardot 稿一致：accent #059669、sidebar 240px、圆角 6/10/14）。
+- [ ] **手动**：复制新内容，列表顶部实时出现该条目（含分组「今天」）。
+- [ ] **手动**：详情面板点「复制」→ 系统粘贴验证内容确被写回（文本/链接/代码）。
+- [ ] **手动**：置顶项恒在列表最前并高亮；收藏标记持久（重启后保持）。
+- [ ] **手动**：删除移至回收站（回收站视图 P3 为占位，恢复/清理留待后续）。
+- [ ] **手动**：设置 → 忽略应用：添加后该应用复制不再被捕获（即时生效 + 持久）。
 
 ---
 

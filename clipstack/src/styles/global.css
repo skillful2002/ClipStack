@@ -18,55 +18,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* P0 占位界面样式（正式主界面在 P3 替换） */
-.boot {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  background: var(--cs-bg-subtle);
-}
-
-.boot-logo {
-  width: 64px;
-  height: 64px;
-  border-radius: var(--cs-radius-lg);
-  background: var(--cs-accent);
-  color: #fff;
-  font-size: 26px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 24px -8px rgba(5, 150, 105, 0.5);
-}
-
-.boot-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--cs-text-primary);
-}
-
-.boot-sub {
-  font-size: 13px;
-  color: var(--cs-text-tertiary);
-}
-
-.boot-btn {
-  margin-top: 8px;
-  height: 40px;
-  padding: 0 18px;
-  border: none;
-  border-radius: var(--cs-radius-md);
-  background: var(--cs-accent);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.boot-btn:hover {
-  filter: brightness(0.95);
+button {
+  font-family: inherit;
 }
