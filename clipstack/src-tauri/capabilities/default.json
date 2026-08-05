@@ -3,5 +3,8 @@
   "identifier": "default",
   "description": "ClipStack 主窗口默认能力（最小权限原则，后续按需放开）",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "autostart:default"
+  ]
 }

@@ -68,6 +68,20 @@
   - ✅ 构建验证：后端 `cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 15/15 通过（P1/P2 未受影响）；前端 `npm run build` 成功。
   - ⏳ **本地手动验证待你执行**（见 P4 小节「验证标准」）：点击托盘菜单复制、全局快捷键切换窗口、关闭按钮隐藏而非退出。沙箱无 GUI，无法代跑。
 
+- **2026-08-05 · P5 检索 / 分类 / 置顶 / 收藏（实现完成）**
+  - 搜索 / 分类（全部/文本/链接/代码/图片/文件）/ 时间筛选（今天/昨天/本周/全部）/ 置顶 / 收藏 已于 P3 落在前端（Sidebar + store.filterItems + 置顶优先排序）。
+  - 新增 ⌘K / Ctrl+K 聚焦搜索框（App.tsx keydown 监听 + Sidebar 搜索框 `id`），P4 一并提交。
+  - 翻译操作为可选占位，未实现（非核心能力）。
+  - ✅ 构建验证：前端 `npm run build` 成功；后端单测未受影响。
+
+- **2026-08-05 · P6 设置 + 安全（实现完成，待本地手动验证）**
+  - `SettingsView` 增强：外观（浅色/深色/跟随系统，写入 `theme` 设置并即时应用）、存储（历史上限，写入 `max_history`，store 启动时读取作为拉取条数）、开机自启开关（tauri-plugin-autostart）、忽略应用管理（沿用 P3）。
+  - 新增 `src/lib/theme.ts`：`applyTheme`/`resolveTheme`，根元素 `data-theme` 驱动；`[data-theme="dark"]` 覆盖设计 Token 变量（app.css）。
+  - App 启动读取 `theme` 设置并应用；store 启动读取 `max_history`。
+  - 后端：`tauri-plugin-autostart = "2"`，`lib.rs` 注册（MacosLauncher::LaunchAgent）；`capabilities/default.json` 加 `autostart:default`（已核对插件 permissions/default.toml 含 allow-enable/disable/is-enabled）。
+  - ✅ 构建验证：后端 `cargo clippy --all-targets -- -D warnings` 0 告警；前端 `npm run build` 成功；`cargo test` 15/15 通过；autostart 权限标识符已核对存在。
+  - ⏳ **本地手动验证待你执行**：切换主题即时变暗、重启保持；修改历史上限重启生效；开机自启开关开启后注销重登自动运行；移除忽略项仍待后续。
+
 ## 通用验证手段（每阶段都跑）
 
 - **Rust**：`cargo test`（单测）、`cargo clippy -D warnings`（零告警）

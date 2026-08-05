@@ -6,7 +6,9 @@ import {
   onClipboardChanged,
   onShowView,
   onTrayCopied,
+  getSettings,
 } from "./lib/tauri";
+import { applyTheme, type Theme } from "./lib/theme";
 import { Sidebar } from "./components/Sidebar";
 import { HistoryList } from "./components/HistoryList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -23,9 +25,18 @@ export default function App() {
   const setView = useHistory((s) => s.setView);
   const select = useHistory((s) => s.select);
 
-  // 加载历史 + 订阅剪贴板变更（实时追加到列表顶部）。
+  // 启动：加载历史、应用已保存主题、订阅剪贴板变更（实时追加到列表顶部）。
   useEffect(() => {
     void load();
+    void (async () => {
+      try {
+        const settings = await getSettings();
+        const t = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
+        if (t) applyTheme(t);
+      } catch {
+        /* 无主题设置时保持浅色默认 */
+      }
+    })();
     const unlisten = onClipboardChanged((item) => prepend(item));
     return () => {
       void unlisten.then((fn) => fn());

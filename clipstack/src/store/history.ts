@@ -62,7 +62,16 @@ export const useHistory = create<HistoryState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
-      const items = await api.getHistory(1000);
+      // 读取历史上限设置（默认 1000），用于首次拉取条数。
+      let limit = 1000;
+      try {
+        const settings = await api.getSettings();
+        const mh = Number(settings.find((s) => s.key === "max_history")?.value);
+        if (mh > 0) limit = mh;
+      } catch {
+        /* 设置读取失败时回退默认 */
+      }
+      const items = await api.getHistory(limit);
       set({
         items: sortItems(items),
         loading: false,

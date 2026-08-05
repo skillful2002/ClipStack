@@ -20,6 +20,7 @@ serde_json = "1"
 arboard = "3"            # 跨平台剪贴板读写（P1 捕获引擎：get_text/get_image/get_file）
 rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 持久化（P2）
 tauri-plugin-global-shortcut = "2"  # P4 全局快捷键（唤起主界面）
+tauri-plugin-autostart = "2"        # P6 开机自启开关
 
 # macOS 专用：读取 NSPasteboard.changeCount 做变更检测，读取来源应用名（NSWorkspace.frontmostApplication）
 [target.'cfg(target_os = "macos")'.dependencies]
