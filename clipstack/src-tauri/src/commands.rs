@@ -134,3 +134,19 @@ pub fn get_item_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String>
     let (blob, _ctype) = row;
     blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
 }
+
+/// 读取回收站条目的二进制内容（图片为 PNG 字节），用于回收站详情面板预览。
+/// 与 `get_item_blob` 类似，但查询的是 `trash` 表。
+#[tauri::command]
+pub fn get_trash_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String> {
+    let conn = db.lock();
+    let row: (Option<Vec<u8>>, String) = conn
+        .query_row(
+            "SELECT content_blob, content_type FROM trash WHERE id = ?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (blob, _ctype) = row;
+    blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
+}
