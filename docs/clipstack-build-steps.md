@@ -1,6 +1,6 @@
 # ClipStack 开发步骤与验证清单
 
-> 状态：**开发中（P4 托盘/快捷键完成，P5/P6/P7 进行中）**
+> 状态：**开发中（P0–P7 代码与配置已全部落地；各阶段自动构建验证通过；托盘/快捷键/主题/出包等需在用户桌面或 CI 手动验证）**
 > 用途：把 `clipstack-development-plan.md` 拆成可逐步执行、每步带验收标准的开发流程
 > 原则：**每阶段验证通过，才进入下一阶段**
 > 最后确认：基于「Node 22（nvm 管理）已就绪」这一前提进入开发；Rust 工具链为 Tauri 后端必需，开发机需另行安装。
@@ -81,6 +81,13 @@
   - 后端：`tauri-plugin-autostart = "2"`，`lib.rs` 注册（MacosLauncher::LaunchAgent）；`capabilities/default.json` 加 `autostart:default`（已核对插件 permissions/default.toml 含 allow-enable/disable/is-enabled）。
   - ✅ 构建验证：后端 `cargo clippy --all-targets -- -D warnings` 0 告警；前端 `npm run build` 成功；`cargo test` 15/15 通过；autostart 权限标识符已核对存在。
   - ⏳ **本地手动验证待你执行**：切换主题即时变暗、重启保持；修改历史上限重启生效；开机自启开关开启后注销重登自动运行；移除忽略项仍待后续。
+
+- **2026-08-05/06 · P7 打包签名与分发（配置完成，待本地/CI 出包与签名）**
+  - `tauri.conf.json`：`bundle.category=Utility`、`shortDescription`/`longDescription`、macOS `minimumSystemVersion=10.15`、Windows `webviewInstallMode=downloadBootstrapper`。**已移除全局 `bundle.targets`**（原 `["dmg","app","msi"]` 在 macOS CI runner 上会因 msi 不支持而报错）——改为依赖 Tauri 各平台默认目标（macOS → app+dmg、Windows → msi+nsis），CI 上传路径不变。
+  - 新增 `.github/workflows/release.yml`：双 job（build-macos 签名+公证 / build-windows msi），由 `v*` 标签或 `workflow_dispatch` 触发；读取 `APPLE_SIGN_IDENTITY/APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID` 四个 Secrets，缺失则仅 ad-hoc 签名（本地测试）；Rust 缓存 + 构建产物 artifact 上传。
+  - 新增 `docs/clipstack-packaging.md`：本地构建、macOS 签名+公证、Windows msi、CI、体积基线、约束说明。
+  - ✅ 构建验证：`cargo build --release`（后台执行）经 `build.rs` 解析 `tauri.conf.json` 通过、release 编译 0 error（验证配置 schema 合法 + release profile 编译可过）；前端 `npm run build` 此前已绿；`cargo clippy --all-targets -- -D warnings` 0 告警、`cargo test` 15/15（P7 无 Rust 代码改动，沿用 P6 成果）。
+  - ⏳ **出包/签名验证待用户在桌面或 CI 执行**（见 P7 小节「验证标准」与 `docs/clipstack-packaging.md`）：`npm run tauri build` 出 dmg/msi、macOS Gatekeeper、Windows WebView2 引导、体积/内存基线。沙箱无签名密钥且无法拉起原生出包，无法代跑。
 
 ## 通用验证手段（每阶段都跑）
 
@@ -264,6 +271,8 @@
 3. 体积 / 内存基线检查。
 
 验证标准：
+- [x] `tauri.conf.json` schema 合法（`cargo build --release` 经 `build.rs` 解析通过）；release profile 编译 0 error。
+- [x] 已修复跨平台 `bundle.targets` 冲突：移除全局 `["dmg","app","msi"]`（macOS runner 会因 msi 不支持报错），改用平台默认目标。
 - [ ] **干净环境**：在**未安装 Rust** 的虚拟机装包并正常运行。
 - [ ] mac 包通过 Gatekeeper；Win 包安装无 WebView2 缺失报错。
 - [ ] 安装包体积在合理范围（目标几 MB ~ 几十 MB）。

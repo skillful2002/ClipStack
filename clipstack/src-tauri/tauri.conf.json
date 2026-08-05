@@ -29,13 +29,23 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app"],
+    "category": "Utility",
+    "shortDescription": "跨平台剪贴板管理器",
+    "longDescription": "ClipStack 是一款跨平台剪切板管理器，后台静默捕获剪贴板历史，支持文本 / 链接 / 代码 / 图片 / 文件分类、搜索、置顶、收藏与一键复制。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

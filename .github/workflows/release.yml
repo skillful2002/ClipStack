@@ -1,0 +1,91 @@
+# ClipStack 发布工作流
+#
+# 触发：推送 v* 标签，或手动 workflow_dispatch。
+# 产物：macOS .dmg（签名 + 公证）、Windows .msi（内嵌 WebView2 引导器）。
+# 说明：
+#   - macOS 签名/公证依赖仓库 Secrets：APPLE_SIGN_IDENTITY / APPLE_ID /
+#     APPLE_PASSWORD / APPLE_TEAM_ID；缺失时仅做 ad-hoc 签名（本地测试用）。
+#   - Windows 包在 windows-latest 上构建，无需额外密钥即可产出未签名 msi；
+#     如需代码签名，可补充相应 Secrets 与 signtool 步骤。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build macOS (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "clipstack/src-tauri"
+
+      - name: Install frontend dependencies
+        working-directory: clipstack
+        run: npm install
+
+      - name: Build and bundle (macOS)
+        working-directory: clipstack
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run tauri build
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipstack-macos
+          path: clipstack/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (.msi)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "clipstack/src-tauri"
+
+      - name: Install frontend dependencies
+        working-directory: clipstack
+        run: npm install
+
+      - name: Build and bundle (Windows)
+        working-directory: clipstack
+        run: npm run tauri build
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipstack-windows
+          path: clipstack/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
