@@ -1,6 +1,6 @@
 # ClipStack 开发步骤与验证清单
 
-> 状态：**开发中（P0–P7 代码与配置已全部落地；各阶段自动构建验证通过；托盘/快捷键/主题/出包等需在用户桌面或 CI 手动验证）**
+> 状态：**开发中（P0–P7 代码与配置已全部落地；P8 图片预览已实现并通过自动构建验证；托盘/快捷键/主题/出包等需在用户桌面或 CI 手动验证）**
 > 用途：把 `clipstack-development-plan.md` 拆成可逐步执行、每步带验收标准的开发流程
 > 原则：**每阶段验证通过，才进入下一阶段**
 > 最后确认：基于「Node 22（nvm 管理）已就绪」这一前提进入开发；Rust 工具链为 Tauri 后端必需，开发机需另行安装。
@@ -88,6 +88,19 @@
   - 新增 `docs/clipstack-packaging.md`：本地构建、macOS 签名+公证、Windows msi、CI、体积基线、约束说明。
   - ✅ 构建验证：`cargo build --release`（后台执行）经 `build.rs` 解析 `tauri.conf.json` 通过、release 编译 0 error（验证配置 schema 合法 + release profile 编译可过）；前端 `npm run build` 此前已绿；`cargo clippy --all-targets -- -D warnings` 0 告警、`cargo test` 15/15（P7 无 Rust 代码改动，沿用 P6 成果）。
   - ⏳ **出包/签名验证待用户在桌面或 CI 执行**（见 P7 小节「验证标准」与 `docs/clipstack-packaging.md`）：`npm run tauri build` 出 dmg/msi、macOS Gatekeeper、Windows WebView2 引导、体积/内存基线。沙箱无签名密钥且无法拉起原生出包，无法代跑。
+
+- **2026-08-05 · P8 图片预览（已实现，待本地手动验证）**
+  - 问题：详情面板选中图片时只有「图片预览（P3 暂不支持）」占位符；arboard 捕获到的是**原始 RGBA 像素**而非图片文件，且 `get_history`/`get_item` 从未 SELECT `content_blob`，图片字节从不回前端。
+  - 修复链路：
+    - `clipboard.rs`：新增 `encode_rgba_to_png`，在落库时把 RGBA 编码为 PNG 再存入 `content_blob`（自描述、前端可直接 `<img>`）；`materialize` 图片分支改为存 PNG、size_bytes 记 PNG 长度。
+    - `commands.rs`：新增 `get_item_blob(db, id)` 读取 `content_blob` 返回 `Vec<u8>`（Tauri 自动以二进制 ArrayBuffer 回传）；`lib.rs` 注册。
+    - 前端 `tauri.ts`：`getItemBlob(id)` 封装，返回 `Uint8Array<ArrayBuffer>`。
+    - 前端 `DetailPanel.tsx`：选中图片时按 id 拉取 PNG，生成 `URL.createObjectURL` 的 `<img>` 预览；含加载中 / 失败 / `onError` 占位与对象 URL 回收（切换/卸载时 `revokeObjectURL`，避免泄漏）。
+    - `app.css`：新增 `.preview-image-wrap` / `.preview-image`，沿用 `--cs-*` 设计 Token。
+    - `Cargo.toml`：`png = "0.17"`（纯 Rust、无系统依赖）。
+  - ✅ 构建验证：`cargo clippy --all-targets -- -D warnings` 0 告警；`cargo test` 16/16（新增 `png_roundtrip_preserves_pixels` 验证编码/解码像素一致）；前端 `npm run build` 成功。
+  - ⏳ **本地手动验证**：复制一张图片 → 选中该条目 → 详情面板显示图片预览；切换条目预览随之更新、旧 URL 被回收。沙箱无 GUI 无法代跑。
+  - ⚠️ 兼容性：本次之前已落库的开发期图片为原始 RGBA（非 PNG），预览会走失败占位；重新复制一张图片即可（新数据均为 PNG）。
 
 ## 通用验证手段（每阶段都跑）
 

@@ -89,3 +89,20 @@ pub fn copy_item(content_type: ContentType, content_text: String) -> Result<(), 
     }
     crate::clipboard::set_clipboard_text(&content_text)
 }
+
+/// 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。
+/// 文本 / 链接 / 代码类条目无二进制，返回错误。
+#[tauri::command]
+pub fn get_item_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String> {
+    let conn = db.lock();
+    // query_row 在无匹配行时返回 Err(QueryReturnedNoRows)，经 map_err 转为错误字符串。
+    let row: (Option<Vec<u8>>, String) = conn
+        .query_row(
+            "SELECT content_blob, content_type FROM history WHERE id = ?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (blob, _ctype) = row;
+    blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
+}

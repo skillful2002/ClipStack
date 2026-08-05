@@ -232,12 +232,17 @@ fn materialize(raw: &RawContent) -> (ContentType, String, String, Option<Vec<u8>
         }
         RawContent::Image { width, height, bytes } => {
             let label = format!("{width}×{height} 图片");
+            // arboard 返回的是原始 RGBA 像素（非图片文件），需编码为 PNG 才能被前端 <img> 直接渲染。
+            // 编码失败时降级为存储原始字节（前端将无法预览，仅开发期旧数据可能命中）。
+            let blob = encode_rgba_to_png(*width as u32, *height as u32, bytes)
+                .or_else(|| Some(bytes.clone()));
+            let size = blob.as_ref().map(|b| b.len()).unwrap_or(0);
             (
                 ContentType::Image,
                 label.clone(),
                 label,
-                Some(bytes.clone()),
-                bytes.len(),
+                blob,
+                size,
             )
         }
         RawContent::Files(p) => {
@@ -294,6 +299,20 @@ fn truncate(s: &str, max: usize) -> String {
     }
     let taken: String = s.chars().take(max).collect();
     format!("{taken}…")
+}
+
+/// 将 arboard 返回的 RGBA8 原始像素（行主序、自上而下）编码为 PNG 字节，
+/// 供前端 `<img>` 直接渲染。编码失败返回 None（调用方降级为存储原始字节）。
+fn encode_rgba_to_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(rgba.len() / 2 + 1024);
+    {
+        let mut enc = png::Encoder::new(&mut out, width, height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().ok()?;
+        writer.write_image_data(rgba).ok()?;
+    }
+    Some(out)
 }
 
 fn content_hash(raw: &RawContent) -> u64 {
@@ -420,5 +439,28 @@ mod tests {
     fn is_link_rejects_multiline() {
         assert!(!is_link("line1\nline2"));
         assert!(is_link("https://a.b"));
+    }
+
+    #[test]
+    fn png_roundtrip_preserves_pixels() {
+        // 2×2 RGBA：红、绿、蓝、黄
+        let rgba: Vec<u8> = vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+        ];
+        let png = encode_rgba_to_png(2, 2, &rgba).expect("encode");
+        // 验证 PNG 文件头签名
+        assert_eq!(
+            &png[..8],
+            &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
+        );
+        // 解码回 RGBA 与原数据一致
+        let decoder = png::Decoder::new(std::io::Cursor::new(&png));
+        let mut reader = decoder.read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        buf.truncate(info.buffer_size());
+        assert_eq!(reader.info().width, 2);
+        assert_eq!(reader.info().height, 2);
+        assert_eq!(buf, rgba);
     }
 }

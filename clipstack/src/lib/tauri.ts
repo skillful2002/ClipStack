@@ -47,6 +47,10 @@ export const getIgnoredApps = (): Promise<string[]> =>
 export const addIgnoredApp = (name: string): Promise<void> =>
   invoke<void>("add_ignored_app", { name });
 
+/** 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。 */
+export const getItemBlob = (id: number): Promise<Uint8Array<ArrayBuffer>> =>
+  invoke<ArrayBuffer>("get_item_blob", { id }).then((b) => new Uint8Array(b));
+
 /** 订阅剪贴板变更事件，返回取消订阅函数。 */
 export const onClipboardChanged = (
   cb: (item: HistoryItem) => void,
