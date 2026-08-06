@@ -44,7 +44,7 @@ export const copyItem = (
   contentType: ContentType,
   contentText: string,
 ): Promise<void> =>
-  invoke<void>("copy_item", { content_type: contentType, content_text: contentText });
+  invoke<void>("copy_item", { contentType, contentText });
 
 /** 读取全部设置项。 */
 export const getSettings = (): Promise<Setting[]> =>
