@@ -17,6 +17,10 @@ export function SettingsView() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [systemApps, setSystemApps] = useState<string[]>([]);
+  const [sysLoading, setSysLoading] = useState(true);
+  const [selectedSys, setSelectedSys] = useState("");
+
   const [theme, setTheme] = useState<Theme>("light");
   const [maxHistory, setMaxHistory] = useState(1000);
   const [trayHistory, setTrayHistory] = useState(30);
@@ -32,6 +36,17 @@ export function SettingsView() {
       setToast(`读取失败：${String(e)}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 加载系统中已安装应用，供「从系统选择」下拉使用。
+  const loadSystemApps = async () => {
+    try {
+      setSystemApps(await api.listInstalledApps());
+    } catch {
+      setSystemApps([]);
+    } finally {
+      setSysLoading(false);
     }
   };
 
@@ -61,6 +76,7 @@ export function SettingsView() {
     })();
     // 系统主题的实时跟随已由 App 启动时注册的 watchSystemTheme 统一处理，
     // 此处无需再监听 matchMedia，避免重复订阅与视图关闭后失效的问题。
+    void loadSystemApps();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -119,6 +135,30 @@ export function SettingsView() {
       setToast(`已忽略：${name}`);
     } catch (e) {
       setToast(`添加失败：${String(e)}`);
+    }
+  };
+
+  // 从「系统已安装应用」下拉添加忽略项。
+  const addSelectedApp = async () => {
+    const name = selectedSys.trim().toLowerCase();
+    if (!name) return;
+    try {
+      await api.addIgnoredApp(name);
+      setSelectedSys("");
+      await refreshApps();
+      setToast(`已忽略：${name}`);
+    } catch (e) {
+      setToast(`添加失败：${String(e)}`);
+    }
+  };
+
+  const removeApp = async (name: string) => {
+    try {
+      await api.removeIgnoredApp(name);
+      await refreshApps();
+      setToast(`已移除忽略：${name}`);
+    } catch (e) {
+      setToast(`移除失败：${String(e)}`);
     }
   };
 
@@ -206,6 +246,33 @@ export function SettingsView() {
           <button onClick={() => void addApp()}>添加</button>
         </div>
 
+        <div className="settings-add">
+          <select
+            className="app-select"
+            value={selectedSys}
+            disabled={sysLoading}
+            onChange={(e) => setSelectedSys(e.target.value)}
+          >
+            <option value="">
+              {sysLoading
+                ? "正在读取系统应用…"
+                : systemApps.length === 0
+                ? "无法枚举系统应用，请手动输入"
+                : "从已安装应用选择…"}
+            </option>
+            {systemApps
+              .filter((n) => !apps.includes(n))
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+          </select>
+          <button onClick={() => void addSelectedApp()} disabled={!selectedSys}>
+            添加选中
+          </button>
+        </div>
+
         <div className="settings-list">
           {loading ? (
             <div className="settings-empty">加载中…</div>
@@ -214,13 +281,20 @@ export function SettingsView() {
           ) : (
             apps.map((a) => (
               <div key={a} className="settings-list-item">
-                {a}
+                <span className="item-name">{a}</span>
+                <button
+                  className="item-remove"
+                  title="移除忽略"
+                  onClick={() => void removeApp(a)}
+                >
+                  ×
+                </button>
               </div>
             ))
           )}
         </div>
         <p className="settings-note">
-          注：移除忽略项将在后续版本提供，当前可通过数据库直接清理。
+          注：可从「已安装应用」下拉快速选择，或在右侧点击 × 移除已忽略的应用。
         </p>
       </div>
     </section>

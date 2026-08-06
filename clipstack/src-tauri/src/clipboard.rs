@@ -334,6 +334,94 @@ pub fn ignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
     state.lock().unwrap().ignored.insert(name.to_lowercase());
 }
 
+/// 从忽略集合移除应用（命令层在清理持久化同时调用，即时生效）。
+pub fn unignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
+    state.lock().unwrap().ignored.remove(&name.to_lowercase());
+}
+
+/// 枚举系统中已安装应用的显示名（小写），供「忽略应用」设置从系统列表选择。
+/// 返回小写名，与监控过滤的 `source.to_lowercase()` 对齐。
+pub fn list_installed_apps() -> Vec<String> {
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    #[cfg(target_os = "macos")]
+    {
+        let mut dirs = vec![
+            std::path::PathBuf::from("/Applications"),
+            std::path::PathBuf::from("/System/Applications"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            dirs.push(std::path::PathBuf::from(home).join("Applications"));
+        }
+        for dir in dirs {
+            collect_app_names(&dir, &mut names);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 非 macOS 暂不支持枚举，交由前端回退到手动输入。
+        let _ = &mut names;
+    }
+    names.into_iter().collect()
+}
+
+#[cfg(target_os = "macos")]
+fn collect_app_names(dir: &std::path::Path, out: &mut std::collections::BTreeSet<String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let fname = match path.file_name().and_then(|f| f.to_str()) {
+            Some(f) => f,
+            None => continue,
+        };
+        if fname.ends_with(".app") {
+            if let Some(name) = app_display_name(&path) {
+                out.insert(name.to_lowercase());
+            }
+        } else if path.is_dir() {
+            // 递归一层：部分应用放在子文件夹（如 /Applications/Utilities）。
+            collect_app_names(&path, out);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn app_display_name(bundle: &std::path::Path) -> Option<String> {
+    let plist = bundle.join("Contents").join("Info.plist");
+    if let Ok(text) = std::fs::read_to_string(&plist) {
+        if let Some(n) = plist_string(&text, "CFBundleDisplayName") {
+            return Some(n);
+        }
+        if let Some(n) = plist_string(&text, "CFBundleName") {
+            return Some(n);
+        }
+    }
+    // 回退：目录名去掉 .app 后缀。
+    bundle
+        .file_name()
+        .and_then(|f| f.to_str())
+        .map(|f| f.trim_end_matches(".app").to_string())
+}
+
+/// 从 XML plist 文本提取某个 `<key>` 对应的 `<string>` 值（轻量解析，满足显示名读取）。
+#[cfg(target_os = "macos")]
+fn plist_string(plist: &str, key: &str) -> Option<String> {
+    let needle = format!("<key>{key}</key>");
+    let idx = plist.find(&needle)?;
+    let rest = &plist[idx + needle.len()..];
+    let open = rest.find("<string>")?;
+    let after = &rest[open + 8..];
+    let close = after.find("</string>")?;
+    let val = after[..close].trim().to_string();
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
+}
+
 /// 主动复制占位：把即将写回剪贴板的文本 hash 记入监控去重队列，
 /// 使其在 `DEDUP_WINDOW` 内被监控线程判定为重复而跳过捕获——
 /// 从而「选中条目重新复制」不会再次入列、也不会改写原复制时间。

@@ -110,6 +110,8 @@ pub fn run() {
             commands::get_settings,
             commands::add_ignored_app,
             commands::get_ignored_apps,
+            commands::remove_ignored_app,
+            commands::list_installed_apps,
             commands::copy_item,
             commands::get_item_blob,
             commands::get_trash_blob,

@@ -568,6 +568,28 @@
   font-size: 13px;
 }
 
+.settings-add button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-add .app-select {
+  flex: 1;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  font-size: 13px;
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-add .app-select:focus {
+  border-color: var(--cs-accent);
+}
+
 .settings-list {
   display: flex;
   flex-wrap: wrap;
@@ -575,11 +597,39 @@
 }
 
 .settings-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: var(--cs-bg);
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-sm);
-  padding: 4px 10px;
+  padding: 4px 6px 4px 10px;
   font-size: 13px;
+}
+
+.settings-list-item .item-name {
+  line-height: 1.4;
+}
+
+.settings-list-item .item-remove {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--cs-text-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-list-item .item-remove:hover {
+  background: var(--cs-danger-soft, rgba(239, 68, 68, 0.12));
+  color: var(--cs-danger, #ef4444);
 }
 
 .settings-empty {

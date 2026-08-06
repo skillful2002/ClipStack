@@ -62,6 +62,14 @@ export const getIgnoredApps = (): Promise<string[]> =>
 export const addIgnoredApp = (name: string): Promise<void> =>
   invoke<void>("add_ignored_app", { name });
 
+/** 从忽略列表移除应用（即时生效 + 持久化）。 */
+export const removeIgnoredApp = (name: string): Promise<void> =>
+  invoke<void>("remove_ignored_app", { name });
+
+/** 枚举系统中已安装应用的显示名（小写），供忽略应用从系统列表选择。 */
+export const listInstalledApps = (): Promise<string[]> =>
+  invoke<string[]>("list_installed_apps");
+
 /** 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。 */
 export const getItemBlob = (id: number): Promise<Uint8Array<ArrayBuffer>> =>
   invoke<ArrayBuffer>("get_item_blob", { id }).then((b) => new Uint8Array(b));

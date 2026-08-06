@@ -327,6 +327,15 @@ pub fn get_ignored_apps(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     rows.collect()
 }
 
+/// 从忽略列表移除应用（按小写名称匹配）。
+pub fn delete_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM ignored_apps WHERE name = ?",
+        [name.to_lowercase()],
+    )?;
+    Ok(())
+}
+
 /// 容量清理：超出上限时硬删最旧 excess 条（不进回收站）。
 pub fn enforce_capacity(conn: &Connection, max: i64) -> rusqlite::Result<()> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))?;
@@ -436,6 +445,17 @@ mod tests {
         insert_ignored_app(&c, "Safari").unwrap();
         let list = get_ignored_apps(&c).unwrap();
         assert_eq!(list, vec!["safari".to_string()]);
+    }
+
+    #[test]
+    fn delete_ignored_app_removes_it() {
+        let c = mem_db();
+        insert_ignored_app(&c, "Safari").unwrap();
+        insert_ignored_app(&c, "Terminal").unwrap();
+        delete_ignored_app(&c, "SAFARI").unwrap();
+        let list = get_ignored_apps(&c).unwrap();
+        // 按小写匹配；删除后仅剩 terminal。
+        assert_eq!(list, vec!["terminal".to_string()]);
     }
 
     #[test]

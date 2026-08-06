@@ -123,6 +123,24 @@ pub fn get_ignored_apps(db: State<'_, DbState>) -> Result<Vec<String>, String> {
     db::get_ignored_apps(&conn).map_err(|e| e.to_string())
 }
 
+/// 从忽略列表移除应用（内存集 + 持久化同时清理，即时生效）。
+#[tauri::command]
+pub fn remove_ignored_app(
+    db: State<'_, DbState>,
+    monitor: State<'_, Arc<Mutex<MonitorState>>>,
+    name: String,
+) -> Result<(), String> {
+    crate::clipboard::unignore_app(&monitor, &name);
+    let conn = db.lock();
+    db::delete_ignored_app(&conn, &name).map_err(|e| e.to_string())
+}
+
+/// 枚举系统中已安装应用的显示名（小写），供忽略应用从系统列表选择。
+#[tauri::command]
+pub fn list_installed_apps() -> Vec<String> {
+    crate::clipboard::list_installed_apps()
+}
+
 /// 一键复制：将条目内容写回系统剪贴板（文本 / 链接 / 代码）。
 /// 图片 / 文件因需二进制解析与平台文件 API，P3 暂不支持。
 #[tauri::command]
