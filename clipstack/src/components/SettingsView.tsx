@@ -19,6 +19,7 @@ export function SettingsView() {
 
   const [theme, setTheme] = useState<Theme>("light");
   const [maxHistory, setMaxHistory] = useState(1000);
+  const [trayHistory, setTrayHistory] = useState(30);
   const [startup, setStartup] = useState(false);
   const [startupBusy, setStartupBusy] = useState(false);
 
@@ -47,6 +48,8 @@ export function SettingsView() {
         }
         const mh = Number(settings.find((s) => s.key === "max_history")?.value);
         if (mh > 0) setMaxHistory(mh);
+        const th = Number(settings.find((s) => s.key === "tray_history_count")?.value);
+        if (th > 0) setTrayHistory(th);
       } catch (e) {
         setToast(`设置读取失败：${String(e)}`);
       }
@@ -77,6 +80,17 @@ export function SettingsView() {
     try {
       await api.updateSetting("max_history", String(clamped));
       setToast("已保存历史上限（下次启动时生效）");
+    } catch (e) {
+      setToast(`保存失败：${String(e)}`);
+    }
+  };
+
+  const onTrayHistoryChange = async (v: number) => {
+    const clamped = Math.max(1, Math.min(100, v || 30));
+    setTrayHistory(clamped);
+    try {
+      await api.updateSetting("tray_history_count", String(clamped));
+      setToast("已保存托盘历史条数（立即生效）");
     } catch (e) {
       setToast(`保存失败：${String(e)}`);
     }
@@ -143,6 +157,17 @@ export function SettingsView() {
           />
         </div>
         <p className="settings-hint">超出上限的最旧记录会被自动清理；调整将在下次启动时生效。</p>
+        <div className="settings-row">
+          <span>托盘菜单历史条数</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={trayHistory}
+            onChange={(e) => void onTrayHistoryChange(Number(e.target.value))}
+          />
+        </div>
+        <p className="settings-hint">托盘图标菜单中显示的最近历史条数（1–100，默认 30），保存后立即生效。</p>
       </div>
 
       <div className="settings-card">

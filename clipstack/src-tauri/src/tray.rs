@@ -15,8 +15,9 @@ use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::models::ContentType;
 
-/// 托盘菜单展示的最近历史条数。
-const RECENT_LIMIT: i64 = 5;
+/// 托盘菜单展示历史记录条数的设置键与缺省值。
+const TRAY_HISTORY_KEY: &str = "tray_history_count";
+pub const DEFAULT_TRAY_HISTORY: i64 = 30;
 
 /// 构建并安装托盘图标 + 菜单；返回 TrayIcon 句柄（供后续刷新菜单）。
 pub fn build_tray(
@@ -56,7 +57,8 @@ fn build_menu(
 ) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
     let conn = db.conn.lock().expect("db lock poisoned");
-    let recent = db::get_recent(&conn, RECENT_LIMIT)?;
+    let limit = db::get_int_setting(&conn, TRAY_HISTORY_KEY, DEFAULT_TRAY_HISTORY);
+    let recent = db::get_recent(&conn, limit)?;
     drop(conn);
 
     if recent.is_empty() {

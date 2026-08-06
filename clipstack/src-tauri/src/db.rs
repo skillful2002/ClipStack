@@ -299,6 +299,18 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Vec<Setting>> {
     rows.collect()
 }
 
+/// 读取整型设置项；键不存在或值无法解析时返回 default。
+pub fn get_int_setting(conn: &Connection, key: &str, default: i64) -> i64 {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key = ?",
+        [key],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(v) => v.parse::<i64>().unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
 /// 写入忽略应用（按名称去重，名称与监控线程过滤的 app name 对齐）。
 pub fn insert_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()> {
     conn.execute(
@@ -473,5 +485,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
             .unwrap();
         assert_eq!(trash_count, 0);
+    }
+
+    #[test]
+    fn get_int_setting_returns_value_or_default() {
+        let c = mem_db();
+        // 缺省：键不存在时返回 default
+        assert_eq!(get_int_setting(&c, "tray_history_count", 30), 30);
+        // 写入后读取
+        update_setting(&c, "tray_history_count", "12").unwrap();
+        assert_eq!(get_int_setting(&c, "tray_history_count", 30), 12);
+        // 无法解析时回退 default
+        update_setting(&c, "tray_history_count", "not-a-number").unwrap();
+        assert_eq!(get_int_setting(&c, "tray_history_count", 30), 30);
     }
 }

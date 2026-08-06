@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState, DEFAULT_LIMIT};
@@ -76,10 +76,25 @@ pub fn toggle_favorite(db: State<'_, DbState>, id: i64) -> Result<bool, String> 
 }
 
 /// 写入 / 覆盖单个设置项。
+/// 若保存的键为托盘历史条数，则广播 `tray-settings-changed`，使托盘菜单立即按新值刷新。
 #[tauri::command]
-pub fn update_setting(db: State<'_, DbState>, key: String, value: String) -> Result<(), String> {
-    let conn = db.lock();
-    db::update_setting(&conn, &key, &value).map_err(|e| e.to_string())
+pub fn update_setting(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    // 注意：app.emit 会同步触发监听器并再次 lock db，必须先释放本命令持有的 db 锁，
+    // 否则 build_menu 在监听器内等待 db 锁 → 与命令持有的锁相互等待 → 死锁卡死。
+    let refresh_tray = key == "tray_history_count";
+    {
+        let conn = db.lock();
+        db::update_setting(&conn, &key, &value).map_err(|e| e.to_string())?;
+    }
+    if refresh_tray {
+        let _ = app.emit("tray-settings-changed", ());
+    }
+    Ok(())
 }
 
 /// 读取全部设置项。

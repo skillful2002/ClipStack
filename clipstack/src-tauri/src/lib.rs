@@ -54,6 +54,16 @@ pub fn run() {
             app.listen("clipboard-changed", move |_event| {
                 tray::refresh_menu(&tray_clone, tray_clone.app_handle(), &db_for_refresh);
             });
+            // 托盘历史条数设置变更时立即刷新托盘菜单。
+            let tray_for_settings = tray.clone();
+            let db_for_settings = db_state.clone();
+            app.listen("tray-settings-changed", move |_event| {
+                tray::refresh_menu(
+                    &tray_for_settings,
+                    tray_for_settings.app_handle(),
+                    &db_for_settings,
+                );
+            });
 
             // 全局快捷键：Cmd/Ctrl + Shift + V 切换主界面可见性。
             app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+V", |app, _shortcut, event| {
