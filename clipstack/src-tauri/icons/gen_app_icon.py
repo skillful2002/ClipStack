@@ -17,8 +17,8 @@ def lerp(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-C_TOP = (91, 141, 239)     # #5B8DEF 蓝
-C_BOTTOM = (138, 91, 239)  # #8A5BEF 紫
+C_TOP = (5, 150, 105)      # #059669 绿
+C_BOTTOM = (4, 120, 87)    # #047857 深绿（emerald 渐变）
 
 
 def rr(draw, box, r, fill, outline=None, width=0):
@@ -62,7 +62,7 @@ clip = [cx - clip_w // 2, body[1] - clip_h // 2 + int(24 * scale),
 rr(wd, clip, 34, (255, 255, 255, 255))
 
 # 文本行
-line_color = (185, 198, 255, 255)
+line_color = (167, 243, 208, 255)  # #A7F3D0 浅绿（与绿色背景协调）
 line_w = 360
 for ly in (cy - 120, cy - 20, cy + 80):
     rr(wd, [cx - line_w // 2, ly, cx + line_w // 2, ly + 30], 15, line_color)
