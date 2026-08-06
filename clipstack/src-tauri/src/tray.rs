@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
-use crate::models::ContentType;
+use crate::i18n::{type_prefix, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
 
 /// 托盘菜单展示历史记录条数的设置键与缺省值。
 const TRAY_HISTORY_KEY: &str = "tray_history_count";
@@ -60,14 +60,25 @@ fn build_menu(
     let conn = db.conn.lock().expect("db lock poisoned");
     let limit = db::get_int_setting(&conn, TRAY_HISTORY_KEY, DEFAULT_TRAY_HISTORY);
     let recent = db::get_recent(&conn, limit)?;
+    // 解析菜单语言：显式选择具体语言时从设置直接取值（首帧即正确）；
+    // system/未知则使用前端推送的已解析语言（MenuLang 状态，缺省英文）。
+    let setting = db::get_string_setting(&conn, "language", "system");
+    let lang = Lang::resolve(
+        &setting,
+        *app.state::<MenuLang>().0.lock().expect("menu lang lock poisoned"),
+    );
     drop(conn);
 
     if recent.is_empty() {
-        let empty = MenuItem::with_id(app, "empty", "（暂无历史记录）", false, None::<&str>)?;
+        let empty = MenuItem::with_id(app, "empty", tray_empty(lang), false, None::<&str>)?;
         menu.append(&empty)?;
     } else {
         for it in &recent {
-            let label = format!("{} {}", type_prefix(&it.content_type), truncate(&it.preview, 40));
+            let label = format!(
+                "{} {}",
+                type_prefix(it.content_type, lang),
+                truncate(&it.preview, 40)
+            );
             let id = format!("copy:{}", it.id);
             let item = MenuItem::with_id(app, id, label, true, None::<&str>)?;
             menu.append(&item)?;
@@ -80,16 +91,16 @@ fn build_menu(
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(
-        &IconMenuItemBuilder::with_id("open_main", "打开主界面")
+        &IconMenuItemBuilder::with_id("open_main", tray_open_main(lang))
             .icon(open_icon)
             .build(app)?,
     )?;
     menu.append(
-        &IconMenuItemBuilder::with_id("settings", "设置")
+        &IconMenuItemBuilder::with_id("settings", tray_settings(lang))
             .icon(settings_icon)
             .build(app)?,
     )?;
-    menu.append(&PredefinedMenuItem::quit(app, Some("退出 ClipStack"))?)?;
+    menu.append(&PredefinedMenuItem::quit(app, Some(tray_quit(lang)))?)?;
     Ok(menu)
 }
 
@@ -136,17 +147,7 @@ fn handle_menu_event(
     }
 }
 
-/// 类型短标签（无 emoji，符合文件规范）。
-fn type_prefix(ct: &ContentType) -> &'static str {
-    match ct {
-        ContentType::Text => "[文]",
-        ContentType::Link => "[链]",
-        ContentType::Code => "[码]",
-        ContentType::Image => "[图]",
-        ContentType::File => "[件]",
-    }
-}
-
+/// 截断过长的预览文本，超出部分以省略号结尾。
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();

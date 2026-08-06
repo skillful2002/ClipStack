@@ -5,9 +5,11 @@ import { useHistory } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { getTrashBlob } from "../lib/tauri";
 import { TYPE_META, formatBytes, fullDateTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { TypeIcon, RestoreIcon, TrashIcon } from "./icons";
 
 export function TrashDetail() {
+  const t = useT();
   const item = useHistory(
     (s) => s.trashItems.find((i) => i.id === s.selectedTrashId) ?? null,
   );
@@ -57,7 +59,7 @@ export function TrashDetail() {
   if (!item) {
     return (
       <aside className="detail-pane">
-        <div className="detail-empty">选择左侧条目查看详情</div>
+        <div className="detail-empty">{t("detail.empty")}</div>
       </aside>
     );
   }
@@ -74,21 +76,21 @@ export function TrashDetail() {
           style={{ color: meta.color, background: `${meta.color}1a` }}
         >
           <TypeIcon type={item.contentType} size={16} />
-          {meta.label}
+          {t(`type.${item.contentType}`)}
         </span>
-        <span className="detail-app">{item.sourceApp || "未知来源"}</span>
+        <span className="detail-app">{item.sourceApp || t("item.unknownSource")}</span>
       </div>
 
       <div className="detail-preview">
         {isImage ? (
           <div className="preview-image-wrap">
-            {imgLoading && <div className="preview-image-placeholder">图片加载中…</div>}
-            {imgError && <div className="preview-image-placeholder">图片加载失败</div>}
+            {imgLoading && <div className="preview-image-placeholder">{t("detail.imageLoading")}</div>}
+            {imgError && <div className="preview-image-placeholder">{t("detail.imageError")}</div>}
             {imgUrl && !imgLoading && !imgError && (
               <img
                 className="preview-image"
                 src={imgUrl}
-                alt="回收站剪贴板图片预览"
+                alt={t("detail.trashImageAlt")}
                 onError={() => setImgError(true)}
               />
             )}
@@ -110,11 +112,11 @@ export function TrashDetail() {
 
       <div className="detail-meta">
         <div className="meta-row">
-          <span className="meta-key">大小</span>
+          <span className="meta-key">{t("detail.metaSize")}</span>
           <span className="meta-val">{formatBytes(item.sizeBytes)}</span>
         </div>
         <div className="meta-row">
-          <span className="meta-key">删除时间</span>
+          <span className="meta-key">{t("trashDetail.metaDeletedAt")}</span>
           <span className="meta-val">{fullDateTime(item.deletedAt ?? item.createdAt)}</span>
         </div>
       </div>
@@ -122,11 +124,11 @@ export function TrashDetail() {
       <div className="detail-actions">
         <button className="primary" onClick={() => restore(item)}>
           <RestoreIcon size={15} />
-          恢复
+          {t("action.restore")}
         </button>
         <button className="danger" onClick={() => purge(item)}>
           <TrashIcon size={15} />
-          彻底删除
+          {t("action.purge")}
         </button>
       </div>
     </aside>

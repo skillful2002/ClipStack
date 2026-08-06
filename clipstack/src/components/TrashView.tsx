@@ -3,10 +3,12 @@
 import { useHistory } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { TYPE_META, relativeTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import type { HistoryItem } from "../types";
 import { TypeIcon, RestoreIcon, TrashIcon } from "./icons";
 
 export function TrashView() {
+  const t = useT();
   const trashItems = useHistory((s) => s.trashItems);
   const selectedTrashId = useHistory((s) => s.selectedTrashId);
   const selectTrash = useHistory((s) => s.selectTrash);
@@ -16,26 +18,26 @@ export function TrashView() {
     <section className="list-pane">
       <div className="list-toolbar">
         <div className="time-tabs">
-          <span className="trash-title">回收站</span>
+          <span className="trash-title">{t("trash.title")}</span>
         </div>
         <div className="trash-toolbar-right">
-          <span className="list-count">{trashItems.length} 项</span>
+          <span className="list-count">{t("list.itemsCount", { n: trashItems.length })}</span>
           <button
             className="trash-empty-btn"
             onClick={() => {
               if (trashItems.length === 0) return;
-              if (confirm("确定清空回收站？此操作不可恢复。")) void emptyTrash();
+              if (confirm(t("trash.confirmEmpty"))) void emptyTrash();
             }}
             disabled={trashItems.length === 0}
           >
-            清空回收站
+            {t("trash.emptyButton")}
           </button>
         </div>
       </div>
 
       <div className="list-body">
         {trashItems.length === 0 ? (
-          <div className="list-empty">回收站为空，删除的剪贴板记录会暂存于此</div>
+          <div className="list-empty">{t("trash.empty")}</div>
         ) : (
           trashItems.map((it: HistoryItem) => {
             const meta = TYPE_META[it.contentType];
@@ -53,20 +55,20 @@ export function TrashView() {
                 </span>
 
                 <div className="item-main">
-                  <div className="item-preview">{it.preview || "（空内容）"}</div>
+                  <div className="item-preview">{it.preview || t("item.emptyContent")}</div>
                   <div className="item-sub">
-                    <span className="item-app">{it.sourceApp || "未知来源"}</span>
+                    <span className="item-app">{it.sourceApp || t("item.unknownSource")}</span>
                     <span className="item-dot">·</span>
-                    <span>删除于 {relativeTime(it.deletedAt ?? it.createdAt)}</span>
+                    <span>{t("trash.deletedAt", { time: relativeTime(it.deletedAt ?? it.createdAt) })}</span>
                   </div>
                 </div>
 
                 <div className="item-actions" onClick={(e) => e.stopPropagation()}>
-                  <button title="恢复" onClick={() => restore(it)}>
+                  <button title={t("action.restore")} onClick={() => restore(it)}>
                     <RestoreIcon size={15} />
                   </button>
                   <button
-                    title="彻底删除"
+                    title={t("action.purge")}
                     className="danger"
                     onClick={() => purge(it)}
                   >

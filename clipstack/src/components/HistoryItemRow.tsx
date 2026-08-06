@@ -2,6 +2,7 @@
 
 import type { HistoryItem } from "../types";
 import { TYPE_META, relativeTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
 
 interface Props {
@@ -23,6 +24,7 @@ export function HistoryItemRow({
   onFav,
   onDelete,
 }: Props) {
+  const t = useT();
   const meta = TYPE_META[item.contentType];
   return (
     <div
@@ -34,9 +36,9 @@ export function HistoryItemRow({
       </span>
 
       <div className="item-main">
-        <div className="item-preview">{item.preview || "（空内容）"}</div>
+        <div className="item-preview">{item.preview || t("item.emptyContent")}</div>
         <div className="item-sub">
-          <span className="item-app">{item.sourceApp || "未知来源"}</span>
+          <span className="item-app">{item.sourceApp || t("item.unknownSource")}</span>
           <span className="item-dot">·</span>
           <span>{relativeTime(item.createdAt)}</span>
         </div>
@@ -48,16 +50,16 @@ export function HistoryItemRow({
       </div>
 
       <div className="item-actions" onClick={(e) => e.stopPropagation()}>
-        <button title="复制" onClick={() => onCopy(item)}>
+        <button title={t("action.copy")} onClick={() => onCopy(item)}>
           <CopyIcon size={15} />
         </button>
-        <button title={item.isPinned ? "取消置顶" : "置顶"} onClick={() => onPin(item)}>
+        <button title={item.isPinned ? t("action.unpin") : t("action.pin")} onClick={() => onPin(item)}>
           <PinIcon size={15} active={item.isPinned} />
         </button>
-        <button title={item.isFavorite ? "取消收藏" : "收藏"} onClick={() => onFav(item)}>
+        <button title={item.isFavorite ? t("action.unfav") : t("action.fav")} onClick={() => onFav(item)}>
           <StarIcon size={15} active={item.isFavorite} />
         </button>
-        <button title="删除" className="danger" onClick={() => onDelete(item)}>
+        <button title={t("action.delete")} className="danger" onClick={() => onDelete(item)}>
           <TrashIcon size={15} />
         </button>
       </div>

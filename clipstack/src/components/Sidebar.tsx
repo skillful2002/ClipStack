@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useHistory, type Category } from "../store/history";
 import type { ContentType } from "../types";
 import { TYPE_META } from "../lib/format";
+import { useT } from "../lib/i18n";
 import {
   SearchIcon,
   TypeIcon,
@@ -11,16 +12,17 @@ import {
   TrashBinIcon,
 } from "./icons";
 
-const CATEGORIES: { key: Category; label: string; type?: ContentType }[] = [
-  { key: "all", label: "全部" },
-  { key: "text", label: TYPE_META.text.label, type: "text" },
-  { key: "link", label: TYPE_META.link.label, type: "link" },
-  { key: "code", label: TYPE_META.code.label, type: "code" },
-  { key: "image", label: TYPE_META.image.label, type: "image" },
-  { key: "file", label: TYPE_META.file.label, type: "file" },
+const CATEGORIES: { key: Category; type?: ContentType }[] = [
+  { key: "all" },
+  { key: "text", type: "text" },
+  { key: "link", type: "link" },
+  { key: "code", type: "code" },
+  { key: "image", type: "image" },
+  { key: "file", type: "file" },
 ];
 
 export function Sidebar() {
+  const t = useT();
   const items = useHistory((s) => s.items);
   const category = useHistory((s) => s.category);
   const setCategory = useHistory((s) => s.setCategory);
@@ -35,6 +37,9 @@ export function Sidebar() {
     return c;
   }, [items]);
 
+  const categoryLabel = (cat: (typeof CATEGORIES)[number]): string =>
+    cat.key === "all" ? t("sidebar.all") : t(`type.${cat.type}`);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-search">
@@ -42,10 +47,10 @@ export function Sidebar() {
         <input
           id="clipstack-search"
           type="text"
-          placeholder="搜索剪贴板内容…  (⌘K)"
+          placeholder={t("sidebar.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          aria-label="搜索"
+          aria-label={t("sidebar.searchAria")}
         />
       </div>
 
@@ -62,7 +67,7 @@ export function Sidebar() {
             <span className="nav-icon" style={{ color: cat.type ? TYPE_META[cat.type].color : "var(--cs-text-secondary)" }}>
               {cat.type ? <TypeIcon type={cat.type} size={16} /> : <TypeIcon type="text" size={16} />}
             </span>
-            <span className="nav-label">{cat.label}</span>
+            <span className="nav-label">{categoryLabel(cat)}</span>
             <span className="nav-count">{counts[cat.key] ?? 0}</span>
           </button>
         ))}
@@ -76,7 +81,7 @@ export function Sidebar() {
           <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
             <TrashBinIcon size={16} />
           </span>
-          <span className="nav-label">回收站</span>
+          <span className="nav-label">{t("sidebar.trash")}</span>
         </button>
         <button
           className={`nav-item${view === "settings" ? " active" : ""}`}
@@ -85,7 +90,7 @@ export function Sidebar() {
           <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
             <SettingsIcon size={16} />
           </span>
-          <span className="nav-label">设置</span>
+          <span className="nav-label">{t("sidebar.settings")}</span>
         </button>
       </div>
     </aside>

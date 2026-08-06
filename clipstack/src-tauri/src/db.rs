@@ -315,6 +315,18 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Vec<Setting>> {
     rows.collect()
 }
 
+/// 读取字符串设置项；键不存在时返回 default。
+pub fn get_string_setting(conn: &Connection, key: &str, default: &str) -> String {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key = ?",
+        [key],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(v) => v,
+        Err(_) => default.to_string(),
+    }
+}
+
 /// 读取整型设置项；键不存在或值无法解析时返回 default。
 pub fn get_int_setting(conn: &Connection, key: &str, default: i64) -> i64 {
     match conn.query_row(

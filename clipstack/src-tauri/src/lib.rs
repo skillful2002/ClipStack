@@ -6,6 +6,7 @@
 mod clipboard;
 mod commands;
 mod db;
+mod i18n;
 mod models;
 mod tray;
 
@@ -32,6 +33,9 @@ pub fn run() {
             let app_db: AppDb = db::open(app.handle())?;
             let db_state: DbState = Arc::new(app_db);
             app.manage(db_state.clone());
+
+            // 托盘菜单语言状态（前端通过 language-changed 事件推送已解析语言）。
+            app.manage(i18n::MenuLang::default());
 
             // 启动时把持久化的忽略应用载入内存过滤集合，使其即时生效。
             {
@@ -71,6 +75,25 @@ pub fn run() {
                     tray_for_settings.app_handle(),
                     &db_for_settings,
                 );
+            });
+
+            // 前端切换语言时接收已解析语言，更新托盘菜单文案并重建菜单。
+            let tray_for_lang = tray.clone();
+            let db_for_lang = db_state.clone();
+            let app_handle_for_lang = app.handle().clone();
+            app.listen("language-changed", move |event| {
+                if let Ok(lang_str) = serde_json::from_str::<String>(event.payload()) {
+                    if let Some(l) = i18n::Lang::from_setting(&lang_str) {
+                        if let Some(state) = app_handle_for_lang.try_state::<i18n::MenuLang>() {
+                            *state.0.lock().expect("menu lang lock poisoned") = l;
+                        }
+                        tray::refresh_menu(
+                            &tray_for_lang,
+                            tray_for_lang.app_handle(),
+                            &db_for_lang,
+                        );
+                    }
+                }
             });
 
             // 全局快捷键：Cmd/Ctrl + Shift + V 切换主界面可见性。

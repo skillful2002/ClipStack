@@ -1,18 +1,22 @@
-// P3 · 设置视图（P6 增强）：主题、历史上限、开机自启、忽略应用管理。
+// P3 · 设置视图（P6 增强）：主题、语言、历史上限、开机自启、忽略应用管理。
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
 import { applyTheme, type Theme } from "../lib/theme";
 import { useHistory } from "../store/history";
+import { useT, useI18nStore, LANGUAGE_OPTIONS, type Language } from "../lib/i18n";
 
-const THEMES: { key: Theme; label: string }[] = [
-  { key: "light", label: "浅色" },
-  { key: "dark", label: "深色" },
-  { key: "system", label: "跟随系统" },
+const THEMES: { key: Theme }[] = [
+  { key: "light" },
+  { key: "dark" },
+  { key: "system" },
 ];
 
 export function SettingsView() {
+  const t = useT();
+  const setLang = useI18nStore((s) => s.setLang);
+
   const [apps, setApps] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -22,6 +26,7 @@ export function SettingsView() {
   const [selectedSys, setSelectedSys] = useState("");
 
   const [theme, setTheme] = useState<Theme>("system");
+  const [language, setLanguage] = useState<Language>("system");
   const [maxHistory, setMaxHistory] = useState(1000);
   const [trayHistory, setTrayHistory] = useState(30);
   const [startup, setStartup] = useState(false);
@@ -33,7 +38,7 @@ export function SettingsView() {
     try {
       setApps(await api.getIgnoredApps());
     } catch (e) {
-      setToast(`读取失败：${String(e)}`);
+      setToast(t("toast.readFailed", { error: String(e) }));
     } finally {
       setLoading(false);
     }
@@ -50,23 +55,28 @@ export function SettingsView() {
     }
   };
 
-  // 初始化：从设置表读取主题 / 上限，从 autostart 插件读取自启状态。
+  // 初始化：从设置表读取主题 / 语言 / 上限，从 autostart 插件读取自启状态。
   useEffect(() => {
     void refreshApps();
     void (async () => {
       try {
         const settings = await api.getSettings();
-        const t = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
-        if (t) {
-          setTheme(t);
-          applyTheme(t);
+        const th = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
+        if (th) {
+          setTheme(th);
+          applyTheme(th);
+        }
+        const lg = settings.find((s) => s.key === "language")?.value as Language | undefined;
+        if (lg) {
+          setLanguage(lg);
+          setLang(lg);
         }
         const mh = Number(settings.find((s) => s.key === "max_history")?.value);
         if (mh > 0) setMaxHistory(mh);
-        const th = Number(settings.find((s) => s.key === "tray_history_count")?.value);
-        if (th > 0) setTrayHistory(th);
+        const thc = Number(settings.find((s) => s.key === "tray_history_count")?.value);
+        if (thc > 0) setTrayHistory(thc);
       } catch (e) {
-        setToast(`设置读取失败：${String(e)}`);
+        setToast(t("toast.settingsReadFailed", { error: String(e) }));
       }
       try {
         setStartup((await invoke<boolean>("plugin:autostart|is_enabled")) ?? false);
@@ -80,13 +90,23 @@ export function SettingsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onThemeChange = async (t: Theme) => {
-    setTheme(t);
-    void applyTheme(t);
+  const onThemeChange = async (th: Theme) => {
+    setTheme(th);
+    void applyTheme(th);
     try {
-      await api.updateSetting("theme", t);
+      await api.updateSetting("theme", th);
     } catch (e) {
-      setToast(`主题保存失败：${String(e)}`);
+      setToast(t("toast.themeSaveFailed", { error: String(e) }));
+    }
+  };
+
+  const onLanguageChange = async (lg: Language) => {
+    setLanguage(lg);
+    setLang(lg);
+    try {
+      await api.updateSetting("language", lg);
+    } catch (e) {
+      setToast(t("toast.saveFailed", { error: String(e) }));
     }
   };
 
@@ -95,9 +115,9 @@ export function SettingsView() {
     setMaxHistory(clamped);
     try {
       await api.updateSetting("max_history", String(clamped));
-      setToast("已保存历史上限（下次启动时生效）");
+      setToast(t("toast.maxHistorySaved"));
     } catch (e) {
-      setToast(`保存失败：${String(e)}`);
+      setToast(t("toast.saveFailed", { error: String(e) }));
     }
   };
 
@@ -106,9 +126,9 @@ export function SettingsView() {
     setTrayHistory(clamped);
     try {
       await api.updateSetting("tray_history_count", String(clamped));
-      setToast("已保存托盘历史条数（立即生效）");
+      setToast(t("toast.trayHistorySaved"));
     } catch (e) {
-      setToast(`保存失败：${String(e)}`);
+      setToast(t("toast.saveFailed", { error: String(e) }));
     }
   };
 
@@ -119,7 +139,7 @@ export function SettingsView() {
       else await invoke("plugin:autostart|disable");
       setStartup(next);
     } catch (e) {
-      setToast(`自启设置失败：${String(e)}`);
+      setToast(t("toast.startupFailed", { error: String(e) }));
     } finally {
       setStartupBusy(false);
     }
@@ -132,9 +152,9 @@ export function SettingsView() {
       await api.addIgnoredApp(name);
       setInput("");
       await refreshApps();
-      setToast(`已忽略：${name}`);
+      setToast(t("toast.ignoredAdded", { name }));
     } catch (e) {
-      setToast(`添加失败：${String(e)}`);
+      setToast(t("toast.addFailed", { error: String(e) }));
     }
   };
 
@@ -146,9 +166,9 @@ export function SettingsView() {
       await api.addIgnoredApp(name);
       setSelectedSys("");
       await refreshApps();
-      setToast(`已忽略：${name}`);
+      setToast(t("toast.ignoredAdded", { name }));
     } catch (e) {
-      setToast(`添加失败：${String(e)}`);
+      setToast(t("toast.addFailed", { error: String(e) }));
     }
   };
 
@@ -156,38 +176,55 @@ export function SettingsView() {
     try {
       await api.removeIgnoredApp(name);
       await refreshApps();
-      setToast(`已移除忽略：${name}`);
+      setToast(t("toast.ignoredRemoved", { name }));
     } catch (e) {
-      setToast(`移除失败：${String(e)}`);
+      setToast(t("toast.removeFailed", { error: String(e) }));
     }
   };
 
+  const renderLangLabel = (key: Language): string =>
+    key === "system" ? t("language.system") : (LANGUAGE_OPTIONS.find((o) => o.key === key)?.native ?? key);
+
   return (
     <section className="settings-pane">
-      <h2 className="settings-title">设置</h2>
+      <h2 className="settings-title">{t("settings.title")}</h2>
 
       <div className="settings-card">
-        <div className="settings-card-title">外观</div>
+        <div className="settings-card-title">{t("settings.appearance")}</div>
         <div className="settings-row">
-          <span>主题</span>
+          <span>{t("settings.theme")}</span>
           <div className="segmented">
-            {THEMES.map((t) => (
+            {THEMES.map((th) => (
               <button
-                key={t.key}
-                className={theme === t.key ? "active" : ""}
-                onClick={() => void onThemeChange(t.key)}
+                key={th.key}
+                className={theme === th.key ? "active" : ""}
+                onClick={() => void onThemeChange(th.key)}
               >
-                {t.label}
+                {t(`theme.${th.key}`)}
               </button>
             ))}
           </div>
         </div>
+        <div className="settings-row">
+          <span>{t("settings.language")}</span>
+          <select
+            className="app-select"
+            value={language}
+            onChange={(e) => void onLanguageChange(e.target.value as Language)}
+          >
+            {LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {renderLangLabel(o.key)}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="settings-card">
-        <div className="settings-card-title">存储</div>
+        <div className="settings-card-title">{t("settings.storage")}</div>
         <div className="settings-row">
-          <span>历史上限（条）</span>
+          <span>{t("settings.maxHistory")}</span>
           <input
             type="number"
             min={50}
@@ -196,9 +233,9 @@ export function SettingsView() {
             onChange={(e) => void onMaxHistoryChange(Number(e.target.value))}
           />
         </div>
-        <p className="settings-hint">超出上限的最旧记录会被自动清理；调整将在下次启动时生效。</p>
+        <p className="settings-hint">{t("settings.maxHistoryHint")}</p>
         <div className="settings-row">
-          <span>托盘菜单历史条数</span>
+          <span>{t("settings.trayHistory")}</span>
           <input
             type="number"
             min={1}
@@ -207,13 +244,13 @@ export function SettingsView() {
             onChange={(e) => void onTrayHistoryChange(Number(e.target.value))}
           />
         </div>
-        <p className="settings-hint">托盘图标菜单中显示的最近历史条数（1–100，默认 30），保存后立即生效。</p>
+        <p className="settings-hint">{t("settings.trayHistoryHint")}</p>
       </div>
 
       <div className="settings-card">
-        <div className="settings-card-title">开机自启</div>
+        <div className="settings-card-title">{t("settings.startup")}</div>
         <div className="settings-row">
-          <span>登录后自动启动 ClipStack</span>
+          <span>{t("settings.startupLabel")}</span>
           <label className="switch">
             <input
               type="checkbox"
@@ -227,23 +264,20 @@ export function SettingsView() {
       </div>
 
       <div className="settings-card">
-        <div className="settings-card-title">忽略的应用</div>
-        <p className="settings-hint">
-          被忽略应用的复制内容不会被 ClipStack 捕获。名称以小写应用名匹配（如
-          <code> safari</code>、<code> 终端</code>）。
-        </p>
+        <div className="settings-card-title">{t("settings.ignoredApps")}</div>
+        <p className="settings-hint">{t("settings.ignoredAppsHint")}</p>
 
         <div className="settings-add">
           <input
             type="text"
-            placeholder="输入应用名后回车添加…"
+            placeholder={t("settings.appInputPlaceholder")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void addApp();
             }}
           />
-          <button onClick={() => void addApp()}>添加</button>
+          <button onClick={() => void addApp()}>{t("settings.add")}</button>
         </div>
 
         <div className="settings-add">
@@ -255,10 +289,10 @@ export function SettingsView() {
           >
             <option value="">
               {sysLoading
-                ? "正在读取系统应用…"
+                ? t("settings.sysLoading")
                 : systemApps.length === 0
-                ? "无法枚举系统应用，请手动输入"
-                : "从已安装应用选择…"}
+                ? t("settings.sysUnavailable")
+                : t("settings.sysSelect")}
             </option>
             {systemApps
               .filter((n) => !apps.includes(n))
@@ -269,22 +303,22 @@ export function SettingsView() {
               ))}
           </select>
           <button onClick={() => void addSelectedApp()} disabled={!selectedSys}>
-            添加选中
+            {t("settings.addSelected")}
           </button>
         </div>
 
         <div className="settings-list">
           {loading ? (
-            <div className="settings-empty">加载中…</div>
+            <div className="settings-empty">{t("settings.loading")}</div>
           ) : apps.length === 0 ? (
-            <div className="settings-empty">暂无忽略应用</div>
+            <div className="settings-empty">{t("settings.noIgnored")}</div>
           ) : (
             apps.map((a) => (
               <div key={a} className="settings-list-item">
                 <span className="item-name">{a}</span>
                 <button
                   className="item-remove"
-                  title="移除忽略"
+                  title={t("settings.removeIgnoredTitle")}
                   onClick={() => void removeApp(a)}
                 >
                   ×
@@ -293,9 +327,7 @@ export function SettingsView() {
             ))
           )}
         </div>
-        <p className="settings-note">
-          注：可从「已安装应用」下拉快速选择，或在右侧点击 × 移除已忽略的应用。
-        </p>
+        <p className="settings-note">{t("settings.ignoredNote")}</p>
       </div>
     </section>
   );

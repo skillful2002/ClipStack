@@ -4,18 +4,20 @@ import { useMemo, useState } from "react";
 import { useHistory, filterItems, type TimeFilter } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { dayLabel } from "../lib/format";
+import { useT } from "../lib/i18n";
 import type { HistoryItem } from "../types";
 import { HistoryItemRow } from "./HistoryItemRow";
 import { TrashBinIcon } from "./icons";
 
-const TIME_TABS: { key: TimeFilter; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "today", label: "今天" },
-  { key: "yesterday", label: "昨天" },
-  { key: "week", label: "本周" },
+const TIME_TABS: { key: TimeFilter; labelKey: string }[] = [
+  { key: "all", labelKey: "timefilter.all" },
+  { key: "today", labelKey: "timefilter.today" },
+  { key: "yesterday", labelKey: "timefilter.yesterday" },
+  { key: "week", labelKey: "timefilter.week" },
 ];
 
 export function HistoryList() {
+  const t = useT();
   const items = useHistory((s) => s.items);
   const category = useHistory((s) => s.category);
   const timeFilter = useHistory((s) => s.timeFilter);
@@ -47,13 +49,13 @@ export function HistoryList() {
     <section className="list-pane">
       <div className="list-toolbar">
         <div className="time-tabs">
-          {TIME_TABS.map((t) => (
+          {TIME_TABS.map((tt) => (
             <button
-              key={t.key}
-              className={`time-tab${timeFilter === t.key ? " active" : ""}`}
-              onClick={() => setTimeFilter(t.key)}
+              key={tt.key}
+              className={`time-tab${timeFilter === tt.key ? " active" : ""}`}
+              onClick={() => setTimeFilter(tt.key)}
             >
-              {t.label}
+              {t(tt.labelKey)}
             </button>
           ))}
         </div>
@@ -62,19 +64,19 @@ export function HistoryList() {
             className="clear-all-btn"
             disabled={items.length === 0}
             onClick={() => setConfirmOpen(true)}
-            title="清除全部记录"
+            title={t("list.clearAllTooltip")}
           >
             <TrashBinIcon size={14} />
-            清除全部
+            {t("list.clearAllButton")}
           </button>
-          <span className="list-count">{filtered.length} 项</span>
+          <span className="list-count">{t("list.itemsCount", { n: filtered.length })}</span>
         </div>
       </div>
 
       <div className="list-body">
         {filtered.length === 0 ? (
           <div className="list-empty">
-            {search ? "没有匹配的内容" : "暂无剪贴板记录，复制点什么试试"}
+            {search ? t("list.emptySearch") : t("list.emptyDefault")}
           </div>
         ) : (
           groups.map((g) => (
@@ -105,16 +107,16 @@ export function HistoryList() {
           onClick={() => setConfirmOpen(false)}
         >
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="confirm-title">清除全部记录</div>
+            <div className="confirm-title">{t("confirm.clearTitle")}</div>
             <div className="confirm-body">
-              将把全部 {items.length} 条剪贴板记录移入回收站（可在回收站恢复），此操作不可撤销。
+              {t("confirm.clearBody", { n: items.length })}
             </div>
             <div className="confirm-actions">
               <button
                 className="confirm-btn cancel"
                 onClick={() => setConfirmOpen(false)}
               >
-                取消
+                {t("confirm.cancel")}
               </button>
               <button
                 className="confirm-btn danger"
@@ -123,7 +125,7 @@ export function HistoryList() {
                   void clearAll();
                 }}
               >
-                清除全部
+                {t("confirm.clearConfirm")}
               </button>
             </div>
           </div>

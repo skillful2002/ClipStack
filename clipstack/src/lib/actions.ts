@@ -2,6 +2,7 @@
 
 import { useHistory } from "../store/history";
 import * as api from "./tauri";
+import { useT } from "./i18n";
 import type { HistoryItem } from "../types";
 
 export function useItemActions() {
@@ -12,13 +13,14 @@ export function useItemActions() {
   const loadTrash = useHistory((s) => s.loadTrash);
   const applyToggle = useHistory((s) => s.applyToggle);
   const setToast = useHistory((s) => s.setToast);
+  const t = useT();
 
   const copy = async (item: HistoryItem) => {
     try {
       await api.copyItem(item.contentType, item.contentText);
-      setToast("已复制到剪贴板");
+      setToast(t("toast.copied"));
     } catch (e) {
-      setToast(`复制失败：${String(e)}`);
+      setToast(t("toast.copyFailed", { error: String(e) }));
     }
   };
 
@@ -27,7 +29,7 @@ export function useItemActions() {
       const v = await api.togglePin(item.id);
       applyToggle(item.id, "isPinned", v);
     } catch (e) {
-      setToast(`操作失败：${String(e)}`);
+      setToast(t("toast.opFailed", { error: String(e) }));
     }
   };
 
@@ -36,7 +38,7 @@ export function useItemActions() {
       const v = await api.toggleFavorite(item.id);
       applyToggle(item.id, "isFavorite", v);
     } catch (e) {
-      setToast(`操作失败：${String(e)}`);
+      setToast(t("toast.opFailed", { error: String(e) }));
     }
   };
 
@@ -44,9 +46,9 @@ export function useItemActions() {
     try {
       await api.deleteItem(item.id);
       remove(item.id);
-      setToast("已移至回收站");
+      setToast(t("toast.deleted"));
     } catch (e) {
-      setToast(`删除失败：${String(e)}`);
+      setToast(t("toast.deleteFailed", { error: String(e) }));
     }
   };
 
@@ -56,9 +58,9 @@ export function useItemActions() {
       removeTrash(item.id);
       // 恢复后条目回到主列表，刷新主列表使其立即可见（保留当前选中项）。
       void reload();
-      setToast("已恢复");
+      setToast(t("toast.restored"));
     } catch (e) {
-      setToast(`恢复失败：${String(e)}`);
+      setToast(t("toast.restoreFailed", { error: String(e) }));
     }
   };
 
@@ -66,9 +68,9 @@ export function useItemActions() {
     try {
       await api.purgeItem(item.id);
       removeTrash(item.id);
-      setToast("已彻底删除");
+      setToast(t("toast.purged"));
     } catch (e) {
-      setToast(`删除失败：${String(e)}`);
+      setToast(t("toast.purgeFailed", { error: String(e) }));
     }
   };
 
@@ -76,9 +78,9 @@ export function useItemActions() {
     try {
       await api.emptyTrash();
       setTrashItems([]);
-      setToast("回收站已清空");
+      setToast(t("toast.trashEmptied"));
     } catch (e) {
-      setToast(`清空失败：${String(e)}`);
+      setToast(t("toast.emptyFailed", { error: String(e) }));
     }
   };
 
@@ -88,9 +90,9 @@ export function useItemActions() {
       // 主列表清空并刷新，回收站同步刷新（新条目已软删入回收站）。
       void reload();
       void loadTrash();
-      setToast("已全部移至回收站");
+      setToast(t("toast.allMovedToTrash"));
     } catch (e) {
-      setToast(`清除失败：${String(e)}`);
+      setToast(t("toast.clearFailed", { error: String(e) }));
     }
   };
 

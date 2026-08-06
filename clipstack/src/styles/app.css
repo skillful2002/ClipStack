@@ -554,8 +554,8 @@
 
 .detail-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-top: auto;
 }
 
@@ -563,13 +563,19 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  padding: 8px 10px;
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-md);
   background: var(--cs-bg);
   color: var(--cs-text-primary);
   font-size: 13px;
   cursor: pointer;
+}
+
+.detail-actions button svg {
+  flex-shrink: 0;
 }
 
 .detail-actions button:hover {

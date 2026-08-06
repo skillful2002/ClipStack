@@ -1,6 +1,7 @@
 // P3 · 应用根组件：装配三栏布局，启动时加载历史并订阅实时事件。
 
 import { useEffect, useRef } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { useHistory } from "./store/history";
 import {
   onClipboardChanged,
@@ -9,6 +10,7 @@ import {
   getSettings,
 } from "./lib/tauri";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
+import { useI18nStore, getResolvedLang, translate, type Language } from "./lib/i18n";
 import { Sidebar } from "./components/Sidebar";
 import { HistoryList } from "./components/HistoryList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -37,6 +39,9 @@ export default function App() {
         const t = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
         // 默认跟随系统（无已保存主题时）。
         await applyTheme(t ?? "system");
+        // 语言：默认跟随系统（无已保存语言时）。
+        const lang = settings.find((s) => s.key === "language")?.value as Language | undefined;
+        if (lang) useI18nStore.getState().setLang(lang);
       } catch {
         /* 读取失败时退化为跟随系统 */
         await applyTheme("system");
@@ -60,7 +65,7 @@ export default function App() {
     const p1 = onShowView((v) => setView(v === "settings" ? "settings" : "main"));
     const p2 = onTrayCopied((id) => {
       select(id);
-      setToast("已复制到剪贴板");
+      setToast(translate(getResolvedLang(), "toast.copied"));
     });
     return () => {
       void p1.then((fn) => fn());
@@ -84,6 +89,14 @@ export default function App() {
   useEffect(() => {
     if (view === "trash") void loadTrash();
   }, [view, loadTrash]);
+
+  // 语言变化（启动加载 / 设置切换）时，将已解析语言推送给后端，
+  // 使托盘菜单文案与界面同步国际化。
+  const lang = useI18nStore((s) => s.lang);
+  useEffect(() => {
+    const resolved = getResolvedLang();
+    void emit("language-changed", resolved).catch(() => {});
+  }, [lang]);
 
   // 提示自动消失。
   useEffect(() => {

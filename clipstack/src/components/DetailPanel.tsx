@@ -1,16 +1,38 @@
 // P3 · 右侧详情面板：类型标签、内容预览、元数据、操作区。
 // P8 · 图片预览：选中图片时按 id 拉取 PNG 二进制，生成对象 URL 渲染 <img>。
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useHistory } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { getItemBlob } from "../lib/tauri";
 import { TYPE_META, formatBytes, fullDateTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
 
 export function DetailPanel() {
+  const t = useT();
   const item = useHistory((s) => s.items.find((i) => i.id === s.selectedId) ?? null);
   const { copy, pin, fav, del } = useItemActions();
+
+  // 详情面板宽度随「当前语言的操作按钮实际宽度」自适应：中文窄、法文宽，
+  // 既不换行也不截断，也不在非中文下留过多空白。
+  const paneRef = useRef<HTMLElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const copyLabel = t("action.copy");
+  const pinLabel = item?.isPinned ? t("action.unpin") : t("action.pin");
+  const favLabel = item?.isFavorite ? t("action.unfav") : t("action.fav");
+  const delLabel = t("action.delete");
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const actions = actionsRef.current;
+    if (actions) {
+      const needed = actions.scrollWidth + 32; // 左右各 16px 内边距
+      pane.style.width = Math.min(Math.max(needed, 300), 520) + "px";
+    } else {
+      pane.style.width = "320px";
+    }
+  }, [copyLabel, pinLabel, favLabel, delLabel, item?.id]);
 
   // 图片预览状态：加载中 / 已就绪的对象 URL / 失败。
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -54,8 +76,8 @@ export function DetailPanel() {
 
   if (!item) {
     return (
-      <aside className="detail-pane">
-        <div className="detail-empty">选择左侧条目查看详情</div>
+      <aside className="detail-pane" ref={paneRef}>
+        <div className="detail-empty">{t("detail.empty")}</div>
       </aside>
     );
   }
@@ -66,25 +88,25 @@ export function DetailPanel() {
   const isImage = item.contentType === "image";
 
   return (
-    <aside className="detail-pane">
+    <aside className="detail-pane" ref={paneRef}>
       <div className="detail-head">
         <span className="detail-type" style={{ color: meta.color, background: `${meta.color}1a` }}>
           <TypeIcon type={item.contentType} size={16} />
-          {meta.label}
+          {t(`type.${item.contentType}`)}
         </span>
-        <span className="detail-app">{item.sourceApp || "未知来源"}</span>
+        <span className="detail-app">{item.sourceApp || t("item.unknownSource")}</span>
       </div>
 
       <div className="detail-preview">
         {isImage ? (
           <div className="preview-image-wrap">
-            {imgLoading && <div className="preview-image-placeholder">图片加载中…</div>}
-            {imgError && <div className="preview-image-placeholder">图片加载失败</div>}
+            {imgLoading && <div className="preview-image-placeholder">{t("detail.imageLoading")}</div>}
+            {imgError && <div className="preview-image-placeholder">{t("detail.imageError")}</div>}
             {imgUrl && !imgLoading && !imgError && (
               <img
                 className="preview-image"
                 src={imgUrl}
-                alt="剪贴板图片预览"
+                alt={t("detail.imageAlt")}
                 onError={() => setImgError(true)}
               />
             )}
@@ -104,35 +126,35 @@ export function DetailPanel() {
 
       <div className="detail-meta">
         <div className="meta-row">
-          <span className="meta-key">来源应用</span>
-          <span className="meta-val">{item.sourceApp || "—"}</span>
+          <span className="meta-key">{t("detail.metaSource")}</span>
+          <span className="meta-val">{item.sourceApp || t("detail.dash")}</span>
         </div>
         <div className="meta-row">
-          <span className="meta-key">大小</span>
+          <span className="meta-key">{t("detail.metaSize")}</span>
           <span className="meta-val">{formatBytes(item.sizeBytes)}</span>
         </div>
         <div className="meta-row">
-          <span className="meta-key">时间</span>
+          <span className="meta-key">{t("detail.metaTime")}</span>
           <span className="meta-val">{fullDateTime(item.createdAt)}</span>
         </div>
         <div className="meta-row">
-          <span className="meta-key">哈希</span>
+          <span className="meta-key">{t("detail.metaHash")}</span>
           <span className="meta-val mono">{item.hash}</span>
         </div>
       </div>
 
-      <div className="detail-actions">
+      <div className="detail-actions" ref={actionsRef}>
         <button className="primary" onClick={() => copy(item)}>
-          <CopyIcon size={15} /> 复制
+          <CopyIcon size={15} /> {t("action.copy")}
         </button>
         <button onClick={() => pin(item)}>
-          <PinIcon size={15} active={item.isPinned} /> {item.isPinned ? "取消置顶" : "置顶"}
+          <PinIcon size={15} active={item.isPinned} /> {item.isPinned ? t("action.unpin") : t("action.pin")}
         </button>
         <button onClick={() => fav(item)}>
-          <StarIcon size={15} active={item.isFavorite} /> {item.isFavorite ? "取消收藏" : "收藏"}
+          <StarIcon size={15} active={item.isFavorite} /> {item.isFavorite ? t("action.unfav") : t("action.fav")}
         </button>
         <button className="danger" onClick={() => del(item)}>
-          <TrashIcon size={15} /> 删除
+          <TrashIcon size={15} /> {t("action.delete")}
         </button>
       </div>
     </aside>
