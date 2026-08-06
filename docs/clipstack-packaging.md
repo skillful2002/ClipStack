@@ -63,3 +63,17 @@ npm run tauri build
 
 - **沙箱无法执行签名 / 公证 / 真实 `tauri build` 出包**：本阶段代码配置已就绪，最终出包与 Gatekeeper/WebView2 验证需在你本机或 CI 完成。
 - 图片 / 文件的一键复制因平台 API 限制暂未实现（前端对这两类已禁用复制按钮），后续可接入。
+
+## 七、应用图标与托盘图标
+
+### 图标来源
+- 应用图标由 `src-tauri/icons/gen_app_icon.py`（PIL 脚本）生成 1024×1024 源图 `icon-source.png`，再运行 `tauri icon src-tauri/icons/icon-source.png` 生成全套平台图标（mac `icon.icns`、Win `icon.ico`、通用 `icon.png` 及 32/64/128/iOS/Android/StoreLogo 系列），替换默认 Tauri 图标。
+- 托盘图标**复用应用图标**：`tray.rs` 通过 `app.default_window_icon()` 设置，无需单独维护。
+- 托盘**菜单项**图标（`打开主界面` 窗口 glyph、`设置` 齿轮 glyph）为独立文件 `icons/menu-open.png` / `icons/menu-settings.png`（由 `gen_menu_icons.py` 生成，编译期内嵌）。
+
+### dev 与 build 的差异（重要）
+1. **Dock / 启动台不显示自定义图标**：`npm run tauri dev` 不打包成正式 `.app`，macOS 在 Dock 只显示默认执行文件图标；自定义图标仅在 `npm run tauri build` 生成正式 `.app` 包后才会出现。这是 Tauri 的固有行为，**不是 bug**。
+2. **图标是编译期嵌入的**：`tauri-build`（`build.rs`）在 `cargo build` 时把 `tauri.conf.json` 引用的图标嵌入二进制；它**只在 `tauri.conf.json` 变动时**（`rerun-if-changed`）重新嵌入，**不会**监视图标 PNG 本身的变化。因此：
+   - 仅重新生成 PNG（如跑 `tauri icon`）后，增量 dev/build **仍会用旧的嵌入图标**；
+   - 修复方法：改完 PNG 后执行 `touch src-tauri/tauri.conf.json`，再**彻底退出** dev 进程重新 `npm run tauri dev`（或 `cargo clean` 后重建），托盘/窗口图标才会更新。
+3. **macOS 菜单栏托盘图标渲染**：菜单栏托盘图标默认按「模板图」渲染（忽略彩色、用系统色反色）。彩色图标用作托盘时可能偏单色/发灰，属原生行为；若需更原生观感，可单独提供单色描边版并设为模板图。

@@ -212,8 +212,8 @@ trash( ... , deleted_at INTEGER );
 -- 设置
 settings( key TEXT PRIMARY KEY, value TEXT );
 
--- 忽略应用
-ignored_apps( bundle_id TEXT, exec_name TEXT );
+-- 忽略应用（实际实现见下方「九、实现偏差」：用 name 存应用名，非 bundle_id/exec_name）
+ignored_apps( name TEXT );
 ```
 
 索引：`created_at`、`content_type`、`hash`（去重）。
@@ -240,3 +240,22 @@ ignored_apps( bundle_id TEXT, exec_name TEXT );
 - **平台差异**：托盘弹向（Win 向上 / mac 向下）、菜单栏位置、快捷键冲突。
 - **多实例**：加单例锁，避免重复启动导致双监听。
 - **权限**：macOS 可能需辅助功能 / 屏幕录制授权，安装引导要讲清。
+
+---
+
+## 九、实现偏差与更新记录
+
+> 本节记录规划与实际落地的偏差，避免后续维护误读。
+
+### 9.1 数据模型偏差：`ignored_apps`
+- **规划**（六、数据模型）：`ignored_apps( bundle_id TEXT, exec_name TEXT )`。
+- **实际实现**：表结构为 `ignored_apps( name TEXT )`，按**应用名（小写）**过滤——因为 macOS 剪贴板监控只能拿到前台应用名，拿不到 bundle_id / exec_name。忽略匹配在 `clipboard.rs` 用 `source.to_lowercase()` 对比忽略集（后改为 `eq_ignore_ascii_case` + 存储保留原名，详见 build-steps 2026-08-06）。`ignored_apps` 表 schema 已同步改为 `name TEXT`。
+
+### 9.2 主题缺省值
+- **规划**（M8 设置）：主题含「浅 / 深 / 跟随系统」三态。
+- **实际**：缺省值已实现为**跟随系统**（不再默认浅色）。`theme.ts` 模块级 `currentTheme` 默认 `system`，`App.tsx` 无已保存设置时退化为 `applyTheme("system")`，设置页分段控件默认同步为 `system`；已显式保存的 light/dark 仍被尊重。
+
+### 9.3 进展更新（截至 2026-08-06）
+- P0–P8 已全部落地，P8 之后还完成一系列 bug 修复与功能增强（主题三轮修复、置顶/收藏不被覆盖、重新复制不入列、复制报错修复、托盘历史条数 + 死锁修复、忽略应用增强、系统中文名显示与选择 + 设置页卡顿修复、设置布局、深色输入框、托盘菜单项图标、主题默认跟随系统、主界面「清除全部」、自定义应用图标）。
+- 完整记录与 commit 引用见 `docs/clipstack-build-steps.md` 的「2026-08-06 · P8 之后的修复与增强」条目。
+- 图标在 dev/build 的行为差异（Dock 不显示自定义图标、编译期嵌入需 touch 配置重嵌）见 `docs/clipstack-packaging.md` 第七节。

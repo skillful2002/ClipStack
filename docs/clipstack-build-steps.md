@@ -102,6 +102,24 @@
   - ⏳ **本地手动验证**：复制一张图片 → 选中该条目 → 详情面板显示图片预览；切换条目预览随之更新、旧 URL 被回收。沙箱无 GUI 无法代跑。
   - ⚠️ 兼容性：本次之前已落库的开发期图片为原始 RGBA（非 PNG），预览会走失败占位；重新复制一张图片即可（新数据均为 PNG）。
 
+- **2026-08-06 · P8 之后的修复与增强（全部本地提交，门禁全绿）**
+  - 通用门禁：Rust `cargo clippy --all-targets` 0 告警；`cargo test` 由 16 项增至 **24 项**（新增 clear_history、delete_ignored_app、ignored_apps 大小写匹配等单测）；前端 `npm run build` 通过。GUI / 剪贴板 / 出包仍需桌面或 CI 手动验证。
+  - **主题三轮修复**（`63fb14a`）：① 浅/深色手动切换失效 → 提升深色 CSS 选择器特异性（`[data-theme="dark"]` 覆盖 `tokens.css` 的 `:root` 浅色块）；② 跟随系统颜色不对 → 改用 Tauri 原生 `getCurrentWindow().theme()` / `onThemeChanged`（放弃不可靠的 `matchMedia`）；③ 跟随系统恒浅色 → 移除 `tauri.conf.json` 强制 `"theme":"Light"`；`capabilities/default.json` 增 `core:window:allow-theme`。
+  - **回收站图片预览**（`11f2a0e`）：新增 `get_trash_blob`（读 trash 表 `content_blob`）+ `TrashDetail` 复用预览逻辑。
+  - **置顶/收藏被覆盖**（`01f0f9e`）：`capture()` 原本硬编码 `is_pinned:false` 覆盖用户置顶，改为落库后回填真实 pin/fav 状态。
+  - **重新复制不入列**（`836cfac`）：选中条目复制写回剪贴板会再次触发捕获；新增 `note_self_copy` 占位去重（写 `recent` 队列），不重复入列、不改写原复制时间。
+  - **复制报错**（`9a59b00`）：Tauri v2 将 snake_case 参数转为 camelCase，前端错传 `content_type`，改 `contentType` 修复 `missing required key contentType`。
+  - **托盘历史条数 + 死锁**（`a6060e1`）：设置新增「托盘菜单历史条数」（缺省 30，`DEFAULT_TRAY_HISTORY`），托盘菜单按配置条数展示；保存时 `update_setting` 持 db 锁同步 emit 触发监听器再 lock 导致死锁 → 改为释放锁（独立作用域 drop conn）后再 `app.emit`。
+  - **忽略应用增强**（`c8ca0ea`）：已添加项每行显示 × 即时移除（`remove_ignored_app` + `db::delete_ignored_app`）；新增「从已安装应用选择」下拉（`list_installed_apps`，macOS 扫描 /Applications、~/Applications、/System/Applications/Utilities 的 .app）。
+  - **中文名显示与选择 + 卡顿修复**（`303cf52`，含两处耦合）：① 用 `mdls kMDItemDisplayName` 取 Finder 本地化中文名（与监控 `localizedName()` 同源），并去掉 mdls 返回的 `.app` 后缀保证匹配一致；存储/匹配大小写不敏感且保留原名；② 修复设置页卡顿：收窄扫描范围、递归深度限 1 层、会话级 `OnceLock` 缓存、启动后台线程预热缓存。
+  - **设置界面布局**（`360b23c`）：分组间加 `margin-bottom` 间隔；移除 `.settings-card` 的 `max-width:560px` 使填满窗口宽度，消除右侧空白。
+  - **深色输入框**（`63fbc94`）：`.settings-add input` 补 `background/color/caret-color`，深色模式不再回退浏览器浅色默认。
+  - **托盘菜单项图标**（`c274e4d`）：用 `IconMenuItemBuilder` 给「打开主界面」（窗口 glyph）/「设置」（齿轮 glyph）加图标；新增 `menu-open.png`/`menu-settings.png`（@2x 中性灰，PIL 生成脚本 `gen_menu_icons.py`），`include_bytes` 内嵌；`tauri` 依赖加 `image-png` feature。
+  - **主题缺省值**（`6e58ad5`）：缺省改为「跟随系统」（theme.ts `currentTheme`、`App.tsx` 无已保存设置时退化为 `applyTheme("system")`、SettingsView 分段控件默认 `system`）；已保存的 light/dark 仍被尊重。
+  - **主界面「清除全部」**（`bb73022`）：工具栏按钮（空列表禁用）+ 自定义确认弹窗；确认后 `db::clear_history`（事务：history 全量入 trash 后清空，trash id 自增避免冲突）软删入回收站，主列表与回收站同步刷新。
+  - **应用图标**（`b408c97`）：新增 `gen_app_icon.py` 生成蓝紫剪贴板源图标，`tauri icon` 生成全套平台图标（mac `icon.icns` / Win `icon.ico` / 通用 `icon.png` + 32/64/128/iOS/Android/StoreLogo 系列）替换默认 Tauri 图标；托盘经 `default_window_icon()` 自动复用。
+  - ⚠️ **图标排障要点**：图标由 `tauri-build` 编译期嵌入二进制，仅 `tauri.conf.json` 变动才重嵌；改 PNG 后需 `touch tauri.conf.json` 重启 dev 才生效。**dev 模式 Dock 不显示自定义应用图标**（不打包 .app），`tauri build` 后才出现。详见 `docs/clipstack-packaging.md`.
+
 ## 通用验证手段（每阶段都跑）
 
 - **Rust**：`cargo test`（单测）、`cargo clippy -D warnings`（零告警）
