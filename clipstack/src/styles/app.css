@@ -514,7 +514,7 @@
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-lg);
   padding: 18px;
-  max-width: 560px;
+  margin-bottom: 16px;
 }
 
 .settings-card-title {
