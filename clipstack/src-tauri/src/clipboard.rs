@@ -157,10 +157,17 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         created_at: timestamp,
     };
 
-    let id = {
+    let (id, is_pinned, is_favorite) = {
         let conn = db.conn.lock().unwrap();
         match db::insert_or_bump(&conn, &new) {
-            Ok(id) => id,
+            Ok(id) => {
+                // 复用内容（bump）或新增后，读回该行的真实置顶 / 收藏状态，
+                // 避免把用户设置的 is_pinned/is_favorite 覆盖为 false（否则置顶会被后台重新捕获悄悄取消）。
+                let item = db::get_item(&conn, id).ok();
+                let is_pinned = item.as_ref().map(|i| i.is_pinned).unwrap_or(false);
+                let is_favorite = item.as_ref().map(|i| i.is_favorite).unwrap_or(false);
+                (id, is_pinned, is_favorite)
+            }
             Err(e) => {
                 eprintln!("[clipstack] db insert failed: {e}");
                 return None;
@@ -176,8 +183,8 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         source_app: source,
         size_bytes: new.size_bytes,
         hash: new.hash,
-        is_pinned: false,
-        is_favorite: false,
+        is_pinned,
+        is_favorite,
         created_at: timestamp,
         deleted_at: None,
     })
