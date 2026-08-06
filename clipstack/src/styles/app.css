@@ -552,6 +552,9 @@
   border-radius: var(--cs-radius-md);
   font-size: 13px;
   outline: none;
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+  caret-color: var(--cs-accent);
 }
 
 .settings-add input:focus {
