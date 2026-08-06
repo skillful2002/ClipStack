@@ -6,7 +6,8 @@
 
 use tauri::{
     AppHandle, Emitter, Manager,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    image::Image,
+    menu::{IconMenuItemBuilder, Menu, MenuItem, PredefinedMenuItem},
     tray::{TrayIcon, TrayIconBuilder},
 };
 use std::sync::{Arc, Mutex};
@@ -73,9 +74,21 @@ fn build_menu(
         }
     }
 
+    // 菜单项图标（内嵌避免发布时资源路径依赖）。
+    let open_icon = Image::from_bytes(include_bytes!("../icons/menu-open.png"))?;
+    let settings_icon = Image::from_bytes(include_bytes!("../icons/menu-settings.png"))?;
+
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "open_main", "打开主界面", true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?)?;
+    menu.append(
+        &IconMenuItemBuilder::with_id("open_main", "打开主界面")
+            .icon(open_icon)
+            .build(app)?,
+    )?;
+    menu.append(
+        &IconMenuItemBuilder::with_id("settings", "设置")
+            .icon(settings_icon)
+            .build(app)?,
+    )?;
     menu.append(&PredefinedMenuItem::quit(app, Some("退出 ClipStack"))?)?;
     Ok(menu)
 }
