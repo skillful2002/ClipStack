@@ -116,7 +116,7 @@ pub fn add_ignored_app(
     db::insert_ignored_app(&conn, &name).map_err(|e| e.to_string())
 }
 
-/// 读取全部忽略应用名（小写）。
+/// 读取全部忽略应用名（系统原始显示名）。
 #[tauri::command]
 pub fn get_ignored_apps(db: State<'_, DbState>) -> Result<Vec<String>, String> {
     let conn = db.lock();

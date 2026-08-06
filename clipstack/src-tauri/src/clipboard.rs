@@ -12,7 +12,7 @@
 use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
@@ -110,7 +110,7 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
     // 忽略列表过滤（来源应用名小写匹配）。
     {
         let st = state.lock().unwrap();
-        if st.ignored.contains(&source.to_lowercase()) {
+        if st.ignored.iter().any(|ig| ig.eq_ignore_ascii_case(&source)) {
             println!("[clipstack] ignored by app filter: {source}");
             return None;
         }
@@ -330,30 +330,45 @@ fn content_hash(raw: &RawContent) -> u64 {
 }
 
 /// 将来源应用加入忽略集合（命令层在持久化同时调用，即时生效）。
+/// 保留系统原始显示名（含中文/原始大小写），匹配时大小写不敏感。
 pub fn ignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
-    state.lock().unwrap().ignored.insert(name.to_lowercase());
+    state.lock().unwrap().ignored.insert(name.to_string());
 }
 
 /// 从忽略集合移除应用（命令层在清理持久化同时调用，即时生效）。
+/// 大小写不敏感移除，兼容不同大小写形式的同名项。
 pub fn unignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
-    state.lock().unwrap().ignored.remove(&name.to_lowercase());
+    state.lock().unwrap().ignored.retain(|ig| !ig.eq_ignore_ascii_case(name));
 }
 
-/// 枚举系统中已安装应用的显示名（小写），供「忽略应用」设置从系统列表选择。
-/// 返回小写名，与监控过滤的 `source.to_lowercase()` 对齐。
+/// 枚举系统中已安装应用的显示名（系统本地化名，如中文系统的「访达」「微信」），
+/// 供「忽略应用」设置从系统列表选择，并与监控过滤的 `current_app_name()` 同源。
+///
+/// 性能：逐应用调用 `mdls` 取本地化名开销较大，故使用**会话级缓存**——首次计算后
+/// 复用，避免每次打开设置界面都重新扫描导致卡顿；并在启动阶段后台预热（见 lib.rs setup），
+/// 使首次打开设置即可命中缓存。扫描范围限定为用户应用目录与系统「实用工具」，
+/// 不再遍历整个 `/System/Applications`（数百个系统应用，多数无需忽略且逐 mdls 极慢）。
 pub fn list_installed_apps() -> Vec<String> {
+    // 会话级缓存：空结果不入缓存（避免 mdls 暂不可用时被永久缓存为空）。
+    static CACHE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(g) = cache.lock() {
+        if !g.is_empty() {
+            return g.clone();
+        }
+    }
+
     let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     #[cfg(target_os = "macos")]
     {
-        let mut dirs = vec![
-            std::path::PathBuf::from("/Applications"),
-            std::path::PathBuf::from("/System/Applications"),
-        ];
+        let mut dirs = vec![std::path::PathBuf::from("/Applications")];
         if let Some(home) = std::env::var_os("HOME") {
             dirs.push(std::path::PathBuf::from(home).join("Applications"));
         }
+        // 仅额外扫描系统「实用工具」（如终端等用户可能忽略的应用），避免遍历整个 /System/Applications。
+        dirs.push(std::path::PathBuf::from("/System/Applications/Utilities"));
         for dir in dirs {
-            collect_app_names(&dir, &mut names);
+            collect_app_names(&dir, &mut names, 0);
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -361,11 +376,21 @@ pub fn list_installed_apps() -> Vec<String> {
         // 非 macOS 暂不支持枚举，交由前端回退到手动输入。
         let _ = &mut names;
     }
-    names.into_iter().collect()
+    let result: Vec<String> = names.into_iter().collect();
+    if !result.is_empty() {
+        if let Ok(mut g) = cache.lock() {
+            *g = result.clone();
+        }
+    }
+    result
 }
 
 #[cfg(target_os = "macos")]
-fn collect_app_names(dir: &std::path::Path, out: &mut std::collections::BTreeSet<String>) {
+fn collect_app_names(dir: &std::path::Path, out: &mut std::collections::BTreeSet<String>, depth: usize) {
+    // 最多下钻一层子文件夹（如 /Applications/Utilities），避免误入 .app 内部或无限递归拖慢扫描。
+    if depth > 1 {
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -378,17 +403,34 @@ fn collect_app_names(dir: &std::path::Path, out: &mut std::collections::BTreeSet
         };
         if fname.ends_with(".app") {
             if let Some(name) = app_display_name(&path) {
-                out.insert(name.to_lowercase());
+                out.insert(name);
             }
         } else if path.is_dir() {
             // 递归一层：部分应用放在子文件夹（如 /Applications/Utilities）。
-            collect_app_names(&path, out);
+            collect_app_names(&path, out, depth + 1);
         }
     }
 }
 
 #[cfg(target_os = "macos")]
 fn app_display_name(bundle: &std::path::Path) -> Option<String> {
+    // 优先取 Finder 本地化显示名（中文系统即中文名，如「访达」「微信」），
+    // 与监控线程 current_app_name() 使用的 localizedName() 同源，确保忽略匹配一致。
+    let path = bundle.to_string_lossy();
+    if let Ok(out) = std::process::Command::new("mdls")
+        .args(["-name", "kMDItemDisplayName", "-raw", &path])
+        .output()
+    {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !s.is_empty() && s != "(null)" {
+            // mdls 可能带回 .app 后缀，去掉以与 localizedName() 对齐（否则忽略匹配失效）。
+            let stripped = s.trim_end_matches(".app");
+            if !stripped.is_empty() {
+                return Some(stripped.to_string());
+            }
+        }
+    }
+    // 回退：解析 Info.plist 的显示名键。
     let plist = bundle.join("Contents").join("Info.plist");
     if let Ok(text) = std::fs::read_to_string(&plist) {
         if let Some(n) = plist_string(&text, "CFBundleDisplayName") {

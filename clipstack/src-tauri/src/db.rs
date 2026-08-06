@@ -311,27 +311,29 @@ pub fn get_int_setting(conn: &Connection, key: &str, default: i64) -> i64 {
     }
 }
 
-/// 写入忽略应用（按名称去重，名称与监控线程过滤的 app name 对齐）。
+/// 写入忽略应用：保留系统原始显示名（含中文/原始大小写），
+/// 大小写不敏感去重（先删同名其它大小写形式，再插入当前显示名），避免重复条目。
 pub fn insert_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM ignored_apps WHERE lower(name) = lower(?)", [name])?;
     conn.execute(
         "INSERT OR IGNORE INTO ignored_apps (name) VALUES (?)",
-        [name.to_lowercase()],
+        [name],
     )?;
     Ok(())
 }
 
-/// 读取全部忽略应用名（小写）。
+/// 读取全部忽略应用名（系统原始显示名）。
 pub fn get_ignored_apps(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare("SELECT name FROM ignored_apps")?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     rows.collect()
 }
 
-/// 从忽略列表移除应用（按小写名称匹配）。
+/// 从忽略列表移除应用（大小写不敏感匹配）。
 pub fn delete_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()> {
     conn.execute(
-        "DELETE FROM ignored_apps WHERE name = ?",
-        [name.to_lowercase()],
+        "DELETE FROM ignored_apps WHERE lower(name) = lower(?)",
+        [name],
     )?;
     Ok(())
 }
@@ -444,7 +446,8 @@ mod tests {
         let c = mem_db();
         insert_ignored_app(&c, "Safari").unwrap();
         let list = get_ignored_apps(&c).unwrap();
-        assert_eq!(list, vec!["safari".to_string()]);
+        // 保留原始显示名（不再小写化）。
+        assert_eq!(list, vec!["Safari".to_string()]);
     }
 
     #[test]
@@ -454,8 +457,8 @@ mod tests {
         insert_ignored_app(&c, "Terminal").unwrap();
         delete_ignored_app(&c, "SAFARI").unwrap();
         let list = get_ignored_apps(&c).unwrap();
-        // 按小写匹配；删除后仅剩 terminal。
-        assert_eq!(list, vec!["terminal".to_string()]);
+        // 大小写不敏感匹配；删除后仅剩 Terminal。
+        assert_eq!(list, vec!["Terminal".to_string()]);
     }
 
     #[test]

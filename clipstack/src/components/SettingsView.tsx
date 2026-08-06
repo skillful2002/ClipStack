@@ -126,7 +126,7 @@ export function SettingsView() {
   };
 
   const addApp = async () => {
-    const name = input.trim().toLowerCase();
+    const name = input.trim();
     if (!name) return;
     try {
       await api.addIgnoredApp(name);
@@ -138,9 +138,9 @@ export function SettingsView() {
     }
   };
 
-  // 从「系统已安装应用」下拉添加忽略项。
+  // 从「系统已安装应用」下拉添加忽略项（使用系统原始显示名，保留中文/大小写）。
   const addSelectedApp = async () => {
-    const name = selectedSys.trim().toLowerCase();
+    const name = selectedSys.trim();
     if (!name) return;
     try {
       await api.addIgnoredApp(name);

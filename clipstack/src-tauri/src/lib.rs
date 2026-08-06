@@ -46,6 +46,14 @@ pub fn run() {
             // 启动监控线程并传入 DB 句柄，捕获即落库。
             clipboard::start_monitor(app.handle().clone(), monitor_state.clone(), db_state.clone());
 
+            // 后台预热「已安装应用」列表缓存：在启动阶段于独立线程提前完成一次 mdls 扫描，
+            // 使首次打开设置界面时直接命中缓存、不再因扫描而卡顿。
+            let _ = std::thread::Builder::new()
+                .name("installed-apps-warmup".into())
+                .spawn(|| {
+                    let _ = clipboard::list_installed_apps();
+                });
+
             // 托盘菜单（最近历史 + 固定项）。
             let tray = tray::build_tray(app.handle(), &db_state, &monitor_state)?;
             let tray_clone = tray.clone();
