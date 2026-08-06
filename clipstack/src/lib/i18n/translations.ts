@@ -111,6 +111,7 @@ const zhCN: Dict = {
   "about.back": "返回主界面",
 
   "toast.copied": "已复制到剪贴板",
+  "toast.copyUnsupported": "该类型暂不支持一键复制",
   "toast.copyFailed": "复制失败：{error}",
   "toast.opFailed": "操作失败：{error}",
   "toast.deleted": "已移至回收站",
@@ -242,6 +243,7 @@ const zhTW: Dict = {
   "about.back": "返回主介面",
 
   "toast.copied": "已複製到剪貼簿",
+  "toast.copyUnsupported": "該類型暫不支援一鍵複製",
   "toast.copyFailed": "複製失敗：{error}",
   "toast.opFailed": "操作失敗：{error}",
   "toast.deleted": "已移至資源回收筒",
@@ -373,6 +375,7 @@ const en: Dict = {
   "about.back": "Back to Main",
 
   "toast.copied": "Copied to clipboard",
+  "toast.copyUnsupported": "One-click copy is not supported for this type yet",
   "toast.copyFailed": "Copy failed: {error}",
   "toast.opFailed": "Operation failed: {error}",
   "toast.deleted": "Moved to Trash",
@@ -504,6 +507,7 @@ const ja: Dict = {
   "about.back": "メインに戻る",
 
   "toast.copied": "クリップボードにコピーしました",
+  "toast.copyUnsupported": "この種類はワンクリックコピーに対応していません",
   "toast.copyFailed": "コピーに失敗しました: {error}",
   "toast.opFailed": "操作に失敗しました: {error}",
   "toast.deleted": "ゴミ箱に移動しました",
@@ -635,6 +639,7 @@ const de: Dict = {
   "about.back": "Zurück zum Hauptfenster",
 
   "toast.copied": "In die Zwischenablage kopiert",
+  "toast.copyUnsupported": "Dieser Typ unterstützt das Kopieren per Klick noch nicht",
   "toast.copyFailed": "Kopieren fehlgeschlagen: {error}",
   "toast.opFailed": "Vorgang fehlgeschlagen: {error}",
   "toast.deleted": "In den Papierkorb verschoben",
@@ -766,6 +771,7 @@ const fr: Dict = {
   "about.back": "Retour à la fenêtre principale",
 
   "toast.copied": "Copié dans le presse-papiers",
+  "toast.copyUnsupported": "La copie en un clic n'est pas prise en charge pour ce type",
   "toast.copyFailed": "Échec de la copie : {error}",
   "toast.opFailed": "Échec de l'opération : {error}",
   "toast.deleted": "Déplacé vers la Corbeille",

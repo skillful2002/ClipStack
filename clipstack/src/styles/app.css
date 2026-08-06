@@ -825,7 +825,8 @@
   left: 50%;
   transform: translateX(-50%);
   background: var(--cs-text-primary);
-  color: #fff;
+  /* 反向取 App 背景色作为文字色：浅色主题为深底白字，深色主题为浅底深字（保证深色背景下清晰可读）。 */
+  color: var(--cs-bg);
   padding: 10px 18px;
   border-radius: var(--cs-radius-md);
   font-size: 13px;

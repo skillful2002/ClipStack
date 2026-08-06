@@ -16,6 +16,11 @@ export function useItemActions() {
   const t = useT();
 
   const copy = async (item: HistoryItem) => {
+    // 图片 / 文件因平台 API 限制暂不支持一键复制：直接给出本地化提示，不再调用后端（避免后端硬编码中文报错）。
+    if (item.contentType === "image" || item.contentType === "file") {
+      setToast(t("toast.copyUnsupported"));
+      return;
+    }
     try {
       await api.copyItem(item.contentType, item.contentText);
       setToast(t("toast.copied"));
