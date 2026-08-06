@@ -644,6 +644,61 @@
   font-size: 12px;
 }
 
+/* 关于系统视图 */
+.about-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.about-brand {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.about-desc {
+  margin-bottom: 18px;
+}
+
+.about-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.about-info .settings-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--cs-border);
+}
+
+.about-info .settings-row:last-child {
+  border-bottom: none;
+}
+
+.about-value {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--cs-text-primary);
+  text-align: right;
+}
+
+.about-back {
+  align-self: flex-start;
+  padding: 8px 18px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-bg-subtle);
+  color: var(--cs-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.about-back:hover {
+  border-color: var(--cs-accent, var(--cs-border));
+}
+
 .settings-add {
   display: flex;
   gap: 8px;

@@ -196,3 +196,28 @@ pub fn get_trash_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String
     let (blob, _ctype) = row;
     blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
 }
+
+/// 关于系统：返回运行平台与处理器架构（应用版本 / Tauri 版本由前端 app API 获取）。
+#[derive(serde::Serialize)]
+pub struct SystemInfo {
+    pub platform: String,
+    pub arch: String,
+}
+
+#[tauri::command]
+pub fn get_system_info() -> SystemInfo {
+    let platform = match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    }
+    .to_string();
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "Apple Silicon (aarch64)",
+        other => other,
+    }
+    .to_string();
+    SystemInfo { platform, arch }
+}

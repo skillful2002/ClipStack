@@ -11,6 +11,7 @@ const zhCN: Dict = {
   "sidebar.all": "全部",
   "sidebar.trash": "回收站",
   "sidebar.settings": "设置",
+  "sidebar.about": "关于系统",
 
   "type.text": "文本",
   "type.link": "链接",
@@ -101,6 +102,14 @@ const zhCN: Dict = {
   "settings.removeIgnoredTitle": "移除忽略",
   "settings.ignoredNote": "注：可从「已安装应用」下拉快速选择，或在右侧点击 × 移除已忽略的应用。",
 
+  "about.title": "关于系统",
+  "about.desc": "ClipStack 是一款跨平台剪贴板历史管理工具，帮助你轻松回溯与复用复制过的内容。",
+  "about.version": "应用版本",
+  "about.tauriVersion": "Tauri 版本",
+  "about.platform": "操作系统",
+  "about.arch": "处理器架构",
+  "about.back": "返回主界面",
+
   "toast.copied": "已复制到剪贴板",
   "toast.copyFailed": "复制失败：{error}",
   "toast.opFailed": "操作失败：{error}",
@@ -133,6 +142,7 @@ const zhTW: Dict = {
   "sidebar.all": "全部",
   "sidebar.trash": "資源回收筒",
   "sidebar.settings": "設定",
+  "sidebar.about": "關於系統",
 
   "type.text": "文字",
   "type.link": "連結",
@@ -223,6 +233,14 @@ const zhTW: Dict = {
   "settings.removeIgnoredTitle": "移除忽略",
   "settings.ignoredNote": "註：可從「已安裝應用程式」下拉快速選擇，或在右側點擊 × 移除已忽略的應用程式。",
 
+  "about.title": "關於系統",
+  "about.desc": "ClipStack 是一款跨平台剪貼簿歷史管理工具，協助你輕鬆回溯與重複使用複製過的內容。",
+  "about.version": "應用程式版本",
+  "about.tauriVersion": "Tauri 版本",
+  "about.platform": "作業系統",
+  "about.arch": "處理器架構",
+  "about.back": "返回主介面",
+
   "toast.copied": "已複製到剪貼簿",
   "toast.copyFailed": "複製失敗：{error}",
   "toast.opFailed": "操作失敗：{error}",
@@ -255,6 +273,7 @@ const en: Dict = {
   "sidebar.all": "All",
   "sidebar.trash": "Trash",
   "sidebar.settings": "Settings",
+  "sidebar.about": "About",
 
   "type.text": "Text",
   "type.link": "Link",
@@ -345,6 +364,14 @@ const en: Dict = {
   "settings.removeIgnoredTitle": "Remove from ignore",
   "settings.ignoredNote": "Tip: quickly pick from the “Installed Apps” dropdown, or click × on the right to remove an ignored app.",
 
+  "about.title": "About",
+  "about.desc": "ClipStack is a cross-platform clipboard history manager that helps you revisit and reuse anything you've copied.",
+  "about.version": "App Version",
+  "about.tauriVersion": "Tauri Version",
+  "about.platform": "Operating System",
+  "about.arch": "Architecture",
+  "about.back": "Back to Main",
+
   "toast.copied": "Copied to clipboard",
   "toast.copyFailed": "Copy failed: {error}",
   "toast.opFailed": "Operation failed: {error}",
@@ -377,6 +404,7 @@ const ja: Dict = {
   "sidebar.all": "すべて",
   "sidebar.trash": "ゴミ箱",
   "sidebar.settings": "設定",
+  "sidebar.about": "バージョン情報",
 
   "type.text": "テキスト",
   "type.link": "リンク",
@@ -467,6 +495,14 @@ const ja: Dict = {
   "settings.removeIgnoredTitle": "無視から削除",
   "settings.ignoredNote": "ヒント：「インストール済みアプリ」ドロップダウンから選択するか、右側の × をクリックして無視したアプリを削除できます。",
 
+  "about.title": "バージョン情報",
+  "about.desc": "ClipStack はクロスプラットフォームのクリップボード履歴管理ツールです。コピーした内容を簡単に振り返り、再利用できます。",
+  "about.version": "アプリバージョン",
+  "about.tauriVersion": "Tauri バージョン",
+  "about.platform": "OS",
+  "about.arch": "アーキテクチャ",
+  "about.back": "メインに戻る",
+
   "toast.copied": "クリップボードにコピーしました",
   "toast.copyFailed": "コピーに失敗しました: {error}",
   "toast.opFailed": "操作に失敗しました: {error}",
@@ -499,6 +535,7 @@ const de: Dict = {
   "sidebar.all": "Alle",
   "sidebar.trash": "Papierkorb",
   "sidebar.settings": "Einstellungen",
+  "sidebar.about": "Über",
 
   "type.text": "Text",
   "type.link": "Link",
@@ -589,6 +626,14 @@ const de: Dict = {
   "settings.removeIgnoredTitle": "Aus Ignorieren entfernen",
   "settings.ignoredNote": "Tipp: Schnell über die Dropdown-Liste „Installierte Apps“ wählen oder rechts auf × klicken, um eine ignorierte App zu entfernen.",
 
+  "about.title": "Über",
+  "about.desc": "ClipStack ist ein plattformübergreifendes Verwaltungstool für die Zwischenablage, mit dem du kopierte Inhalte leicht wiederfinden und wiederverwenden kannst.",
+  "about.version": "App-Version",
+  "about.tauriVersion": "Tauri-Version",
+  "about.platform": "Betriebssystem",
+  "about.arch": "Architektur",
+  "about.back": "Zurück zum Hauptfenster",
+
   "toast.copied": "In die Zwischenablage kopiert",
   "toast.copyFailed": "Kopieren fehlgeschlagen: {error}",
   "toast.opFailed": "Vorgang fehlgeschlagen: {error}",
@@ -621,6 +666,7 @@ const fr: Dict = {
   "sidebar.all": "Tout",
   "sidebar.trash": "Corbeille",
   "sidebar.settings": "Paramètres",
+  "sidebar.about": "À propos",
 
   "type.text": "Texte",
   "type.link": "Lien",
@@ -710,6 +756,14 @@ const fr: Dict = {
   "settings.noIgnored": "Aucune application ignorée",
   "settings.removeIgnoredTitle": "Retirer de la liste ignorée",
   "settings.ignoredNote": "Astuce : choisissez rapidement dans le menu déroulant « Applications installées », ou cliquez sur × à droite pour retirer une application ignorée.",
+
+  "about.title": "À propos",
+  "about.desc": "ClipStack est un gestionnaire d'historique de presse-papiers multiplateforme qui vous aide à retrouver et réutiliser tout ce que vous avez copié.",
+  "about.version": "Version de l'application",
+  "about.tauriVersion": "Version de Tauri",
+  "about.platform": "Système d'exploitation",
+  "about.arch": "Architecture",
+  "about.back": "Retour à la fenêtre principale",
 
   "toast.copied": "Copié dans le presse-papiers",
   "toast.copyFailed": "Échec de la copie : {error}",

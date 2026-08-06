@@ -76,6 +76,18 @@ pub fn tray_settings(lang: Lang) -> &'static str {
     }
 }
 
+/// 托盘菜单「关于系统」标签。
+pub fn tray_about(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "关于系统",
+        Lang::ZhTw => "關於系統",
+        Lang::En => "About",
+        Lang::Ja => "バージョン情報",
+        Lang::De => "Über",
+        Lang::Fr => "À propos",
+    }
+}
+
 /// 托盘菜单「退出」标签（PredefinedMenuItem::quit 的自定义文案）。
 pub fn tray_quit(lang: Lang) -> &'static str {
     match lang {

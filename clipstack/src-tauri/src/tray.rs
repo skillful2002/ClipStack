@@ -1,6 +1,6 @@
 // P4 · 托盘 / 菜单栏（macOS 菜单栏图标、Windows 托盘图标）
 //
-// 托盘菜单展示最近若干条历史，点击即复制并广播；另有「打开主界面 / 设置 / 退出」。
+// 托盘菜单展示最近若干条历史，点击即复制并广播；另有「打开主界面 / 设置 / 关于系统 / 退出」。
 // 每次捕获到新内容（clipboard-changed）时重建菜单，保证最近列表常新。
 // 关闭主窗口时改为隐藏（交由 App 的 window event 处理），使应用常驻托盘。
 
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
-use crate::i18n::{type_prefix, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::i18n::{type_prefix, tray_about, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
 
 /// 托盘菜单展示历史记录条数的设置键与缺省值。
 const TRAY_HISTORY_KEY: &str = "tray_history_count";
@@ -88,6 +88,7 @@ fn build_menu(
     // 菜单项图标（内嵌避免发布时资源路径依赖）。
     let open_icon = Image::from_bytes(include_bytes!("../icons/menu-open.png"))?;
     let settings_icon = Image::from_bytes(include_bytes!("../icons/menu-settings.png"))?;
+    let about_icon = Image::from_bytes(include_bytes!("../icons/menu-about.png"))?;
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(
@@ -98,6 +99,13 @@ fn build_menu(
     menu.append(
         &IconMenuItemBuilder::with_id("settings", tray_settings(lang))
             .icon(settings_icon)
+            .build(app)?,
+    )?;
+    // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(
+        &IconMenuItemBuilder::with_id("about", tray_about(lang))
+            .icon(about_icon)
             .build(app)?,
     )?;
     menu.append(&PredefinedMenuItem::quit(app, Some(tray_quit(lang)))?)?;
@@ -142,6 +150,13 @@ fn handle_menu_event(
                 let _ = w.set_focus();
             }
             let _ = app.emit("show-view", "settings");
+        }
+        "about" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("show-view", "about");
         }
         _ => {}
     }

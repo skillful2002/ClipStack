@@ -10,6 +10,7 @@ import {
   TypeIcon,
   SettingsIcon,
   TrashBinIcon,
+  AboutIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -75,6 +76,15 @@ export function Sidebar() {
 
       <div className="sidebar-bottom">
         <button
+          className={`nav-item${view === "settings" ? " active" : ""}`}
+          onClick={() => setView("settings")}
+        >
+          <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+            <SettingsIcon size={16} />
+          </span>
+          <span className="nav-label">{t("sidebar.settings")}</span>
+        </button>
+        <button
           className={`nav-item${view === "trash" ? " active" : ""}`}
           onClick={() => setView("trash")}
         >
@@ -84,13 +94,13 @@ export function Sidebar() {
           <span className="nav-label">{t("sidebar.trash")}</span>
         </button>
         <button
-          className={`nav-item${view === "settings" ? " active" : ""}`}
-          onClick={() => setView("settings")}
+          className={`nav-item${view === "about" ? " active" : ""}`}
+          onClick={() => setView("about")}
         >
           <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-            <SettingsIcon size={16} />
+            <AboutIcon size={16} />
           </span>
-          <span className="nav-label">{t("sidebar.settings")}</span>
+          <span className="nav-label">{t("sidebar.about")}</span>
         </button>
       </div>
     </aside>

@@ -52,6 +52,22 @@ def draw_gear():
     return img
 
 
+def draw_info():
+    """关于系统（info）：圆环 + 圆点 + 竖线，构成经典「i」字形。"""
+    img = new_canvas()
+    d = ImageDraw.Draw(img)
+    cx, cy = SS / 2, SS / 2
+    r = 22
+    # 外圈圆环
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=GRAY, width=5)
+    # 「i」的圆点（上方）
+    dot_y = cy - 9
+    d.ellipse([cx - 3, dot_y - 3, cx + 3, dot_y + 3], fill=GRAY)
+    # 「i」的竖线（下方）
+    d.line([cx, cy - 1, cx, cy + 13], fill=GRAY, width=5)
+    return img
+
+
 def save(img, name):
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
     out = f"{name}.png"
@@ -62,3 +78,4 @@ def save(img, name):
 if __name__ == "__main__":
     save(draw_window(), "menu-open")
     save(draw_gear(), "menu-settings")
+    save(draw_info(), "menu-about")
