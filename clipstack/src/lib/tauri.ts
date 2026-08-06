@@ -31,6 +31,9 @@ export const purgeItem = (id: number): Promise<void> =>
 /** 清空回收站。 */
 export const emptyTrash = (): Promise<void> => invoke<void>("empty_trash");
 
+/** 清空全部历史（软删入回收站，可回收站恢复）。 */
+export const clearAllHistory = (): Promise<void> => invoke<void>("clear_history");
+
 /** 切换置顶，返回切换后状态。 */
 export const togglePin = (id: number): Promise<boolean> =>
   invoke<boolean>("toggle_pin", { id });

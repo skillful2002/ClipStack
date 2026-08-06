@@ -61,6 +61,13 @@ pub fn empty_trash(db: State<'_, DbState>) -> Result<(), String> {
     db::empty_trash(&conn).map_err(|e| e.to_string())
 }
 
+/// 清空全部历史（软删入回收站，可回收站恢复）。
+#[tauri::command]
+pub fn clear_history(db: State<'_, DbState>) -> Result<(), String> {
+    let mut conn = db.lock();
+    db::clear_history(&mut conn).map_err(|e| e.to_string())
+}
+
 /// 切换置顶，返回切换后状态。
 #[tauri::command]
 pub fn toggle_pin(db: State<'_, DbState>, id: i64) -> Result<bool, String> {

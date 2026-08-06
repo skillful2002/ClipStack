@@ -255,6 +255,22 @@ pub fn empty_trash(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 清空全部历史：将 history 全部软删入回收站（与单条 `delete_item` 一致，可回收站恢复），
+/// 随后清空 history 表。trash 的 id 由自增分配（`INSERT` 不指定 id 列），避免与 history
+/// 原 id 重叠触发主键冲突。
+pub fn clear_history(conn: &mut Connection) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    let deleted_at = now_ms();
+    tx.execute(
+        "INSERT INTO trash (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at) \
+         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ? \
+         FROM history",
+        params![deleted_at],
+    )?;
+    tx.execute("DELETE FROM history", [])?;
+    tx.commit()
+}
+
 /// 切换置顶，返回切换后的状态（id 不存在返回 false）。
 pub fn toggle_pin(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
     let n = conn.execute("UPDATE history SET is_pinned = 1 - is_pinned WHERE id = ?", [id])?;
@@ -508,6 +524,31 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
             .unwrap();
         assert_eq!(trash_count, 0);
+    }
+
+    #[test]
+    fn clear_history_moves_all_to_trash() {
+        let mut c = mem_db();
+        insert_or_bump(&c, &sample("a", 100)).unwrap();
+        insert_or_bump(&c, &sample("b", 200)).unwrap();
+        insert_or_bump(&c, &sample("c", 300)).unwrap();
+        clear_history(&mut c).unwrap();
+        // history 被清空
+        let hist_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hist_count, 0);
+        // 全部进入回收站（trash id 自增分配，不与原 history id 冲突）
+        let trash_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 3);
+        // 回收站保留原 content，可恢复
+        let restored = get_trash(&c).unwrap();
+        let hashes: Vec<String> = restored.iter().map(|i| i.hash.clone()).collect();
+        assert!(hashes.contains(&"a".to_string()));
+        assert!(hashes.contains(&"b".to_string()));
+        assert!(hashes.contains(&"c".to_string()));
     }
 
     #[test]

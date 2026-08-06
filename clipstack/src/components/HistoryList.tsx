@@ -1,11 +1,12 @@
 // P3 · 中间主列表：时间筛选标签 + 按日分组的历史条目。
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useHistory, filterItems, type TimeFilter } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { dayLabel } from "../lib/format";
 import type { HistoryItem } from "../types";
 import { HistoryItemRow } from "./HistoryItemRow";
+import { TrashBinIcon } from "./icons";
 
 const TIME_TABS: { key: TimeFilter; label: string }[] = [
   { key: "all", label: "全部" },
@@ -22,7 +23,8 @@ export function HistoryList() {
   const search = useHistory((s) => s.search);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
-  const { copy, pin, fav, del } = useItemActions();
+  const { copy, pin, fav, del, clearAll } = useItemActions();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
     () => filterItems(items, category, timeFilter, search),
@@ -55,7 +57,18 @@ export function HistoryList() {
             </button>
           ))}
         </div>
-        <span className="list-count">{filtered.length} 项</span>
+        <div className="toolbar-right">
+          <button
+            className="clear-all-btn"
+            disabled={items.length === 0}
+            onClick={() => setConfirmOpen(true)}
+            title="清除全部记录"
+          >
+            <TrashBinIcon size={14} />
+            清除全部
+          </button>
+          <span className="list-count">{filtered.length} 项</span>
+        </div>
       </div>
 
       <div className="list-body">
@@ -83,6 +96,39 @@ export function HistoryList() {
           ))
         )}
       </div>
+
+      {confirmOpen && (
+        <div
+          className="confirm-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setConfirmOpen(false)}
+        >
+          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-title">清除全部记录</div>
+            <div className="confirm-body">
+              将把全部 {items.length} 条剪贴板记录移入回收站（可在回收站恢复），此操作不可撤销。
+            </div>
+            <div className="confirm-actions">
+              <button
+                className="confirm-btn cancel"
+                onClick={() => setConfirmOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                className="confirm-btn danger"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  void clearAll();
+                }}
+              >
+                清除全部
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

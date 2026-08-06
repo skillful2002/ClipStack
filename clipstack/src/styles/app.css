@@ -153,6 +153,106 @@
   color: var(--cs-text-tertiary);
 }
 
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.clear-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-bg-subtle);
+  color: var(--cs-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+
+.clear-all-btn:hover:not(:disabled) {
+  color: var(--cs-danger, #e5484d);
+  border-color: var(--cs-danger, #e5484d);
+  background: var(--cs-bg-hover);
+}
+
+.clear-all-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-dialog {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--cs-bg);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-lg);
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+
+.confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cs-text-primary);
+  margin-bottom: 8px;
+}
+
+.confirm-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--cs-text-secondary);
+  margin-bottom: 18px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-btn {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--cs-radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--cs-border);
+}
+
+.confirm-btn.cancel {
+  background: var(--cs-bg-subtle);
+  color: var(--cs-text-primary);
+}
+
+.confirm-btn.cancel:hover {
+  background: var(--cs-bg-hover);
+}
+
+.confirm-btn.danger {
+  background: var(--cs-danger, #e5484d);
+  border-color: var(--cs-danger, #e5484d);
+  color: #fff;
+}
+
+.confirm-btn.danger:hover {
+  filter: brightness(.94);
+}
+
 .list-body {
   flex: 1;
   overflow-y: auto;

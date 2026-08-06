@@ -9,6 +9,7 @@ export function useItemActions() {
   const removeTrash = useHistory((s) => s.removeTrash);
   const setTrashItems = useHistory((s) => s.setTrashItems);
   const reload = useHistory((s) => s.reload);
+  const loadTrash = useHistory((s) => s.loadTrash);
   const applyToggle = useHistory((s) => s.applyToggle);
   const setToast = useHistory((s) => s.setToast);
 
@@ -81,5 +82,17 @@ export function useItemActions() {
     }
   };
 
-  return { copy, pin, fav, del, restore, purge, emptyTrash };
+  const clearAll = async () => {
+    try {
+      await api.clearAllHistory();
+      // 主列表清空并刷新，回收站同步刷新（新条目已软删入回收站）。
+      void reload();
+      void loadTrash();
+      setToast("已全部移至回收站");
+    } catch (e) {
+      setToast(`清除失败：${String(e)}`);
+    }
+  };
+
+  return { copy, pin, fav, del, restore, purge, emptyTrash, clearAll };
 }
