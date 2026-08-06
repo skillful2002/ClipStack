@@ -334,6 +334,19 @@ pub fn ignore_app(state: &Arc<Mutex<MonitorState>>, name: &str) {
     state.lock().unwrap().ignored.insert(name.to_lowercase());
 }
 
+/// 主动复制占位：把即将写回剪贴板的文本 hash 记入监控去重队列，
+/// 使其在 `DEDUP_WINDOW` 内被监控线程判定为重复而跳过捕获——
+/// 从而「选中条目重新复制」不会再次入列、也不会改写原复制时间。
+/// 应在 `set_clipboard_text` 之前调用。
+pub fn note_self_copy(state: &Arc<Mutex<MonitorState>>, text: &str) {
+    let hash = content_hash(&RawContent::Text(text.to_string()));
+    let mut st = state.lock().unwrap();
+    st.recent.push_back((hash, Instant::now()));
+    if st.recent.len() > DEDUP_CAPACITY {
+        st.recent.pop_front();
+    }
+}
+
 /// 将文本写回系统剪贴板（供「复制」按钮、托盘点击使用）。
 ///
 /// 注意：arboard 的 `set_file_list` 为平台私有、`Set` builder 不暴露文件方法，
@@ -470,5 +483,17 @@ mod tests {
         assert_eq!(reader.info().width, 2);
         assert_eq!(reader.info().height, 2);
         assert_eq!(buf, rgba);
+    }
+
+    #[test]
+    fn note_self_copy_records_hash_to_dedup_queue() {
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        let state = Arc::new(Mutex::new(MonitorState::default()));
+        let text = "主动复制的内容";
+        note_self_copy(&state, text);
+        let expected = content_hash(&RawContent::Text(text.to_string()));
+        let st = state.lock().unwrap();
+        assert!(st.recent.iter().any(|(h, _)| *h == expected));
     }
 }

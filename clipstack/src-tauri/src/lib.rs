@@ -47,7 +47,7 @@ pub fn run() {
             clipboard::start_monitor(app.handle().clone(), monitor_state.clone(), db_state.clone());
 
             // 托盘菜单（最近历史 + 固定项）。
-            let tray = tray::build_tray(app.handle(), &db_state)?;
+            let tray = tray::build_tray(app.handle(), &db_state, &monitor_state)?;
             let tray_clone = tray.clone();
             let db_for_refresh = db_state.clone();
             // 每次捕获到新内容时刷新托盘菜单，保持最近列表常新。

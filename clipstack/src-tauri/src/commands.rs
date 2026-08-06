@@ -111,10 +111,16 @@ pub fn get_ignored_apps(db: State<'_, DbState>) -> Result<Vec<String>, String> {
 /// 一键复制：将条目内容写回系统剪贴板（文本 / 链接 / 代码）。
 /// 图片 / 文件因需二进制解析与平台文件 API，P3 暂不支持。
 #[tauri::command]
-pub fn copy_item(content_type: ContentType, content_text: String) -> Result<(), String> {
+pub fn copy_item(
+    content_type: ContentType,
+    content_text: String,
+    monitor: State<'_, Arc<Mutex<MonitorState>>>,
+) -> Result<(), String> {
     if matches!(content_type, ContentType::Image | ContentType::File) {
         return Err("该类型暂不支持一键复制".into());
     }
+    // 先占位，避免监控线程把主动复制的内容重新捕获（改写时间 / 重复入列）。
+    crate::clipboard::note_self_copy(&monitor, &content_text);
     crate::clipboard::set_clipboard_text(&content_text)
 }
 

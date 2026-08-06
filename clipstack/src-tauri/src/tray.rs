@@ -9,7 +9,9 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{TrayIcon, TrayIconBuilder},
 };
+use std::sync::{Arc, Mutex};
 
+use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::models::ContentType;
 
@@ -20,6 +22,7 @@ const RECENT_LIMIT: i64 = 5;
 pub fn build_tray(
     app: &AppHandle,
     db: &DbState,
+    monitor: &Arc<Mutex<MonitorState>>,
 ) -> Result<TrayIcon, Box<dyn std::error::Error>> {
     let icon = app
         .default_window_icon()
@@ -27,12 +30,15 @@ pub fn build_tray(
         .expect("window icon must exist");
     let menu = build_menu(app, db)?;
     let db_for_event = db.clone();
+    let monitor_for_event = monitor.clone();
     let tray = TrayIconBuilder::with_id("clipstack-tray")
         .icon(icon)
         .tooltip("ClipStack")
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .on_menu_event(move |app, event| handle_menu_event(app, event, &db_for_event))
+        .on_menu_event(move |app, event| {
+            handle_menu_event(app, event, &db_for_event, &monitor_for_event)
+        })
         .build(app)?;
     Ok(tray)
 }
@@ -72,13 +78,20 @@ fn build_menu(
     Ok(menu)
 }
 
-fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent, db: &DbState) {
+fn handle_menu_event(
+    app: &AppHandle,
+    event: tauri::menu::MenuEvent,
+    db: &DbState,
+    monitor: &Arc<Mutex<MonitorState>>,
+) {
     let id = event.id().as_ref().to_string();
     if let Some(rest) = id.strip_prefix("copy:") {
         if let Ok(id_num) = rest.parse::<i64>() {
             let conn = db.conn.lock().expect("db lock poisoned");
             if let Ok(item) = db::get_item(&conn, id_num) {
                 drop(conn);
+                // 先占位，避免监控线程把主动复制的内容重新捕获（改写时间 / 重复入列）。
+                crate::clipboard::note_self_copy(monitor, &item.content_text);
                 match crate::clipboard::set_clipboard_text(&item.content_text) {
                     Ok(()) => {
                         let _ = app.emit("tray-copied", serde_json::json!({ "id": id_num }));
