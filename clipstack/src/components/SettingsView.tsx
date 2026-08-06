@@ -21,7 +21,7 @@ export function SettingsView() {
   const [sysLoading, setSysLoading] = useState(true);
   const [selectedSys, setSelectedSys] = useState("");
 
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>("system");
   const [maxHistory, setMaxHistory] = useState(1000);
   const [trayHistory, setTrayHistory] = useState(30);
   const [startup, setStartup] = useState(false);

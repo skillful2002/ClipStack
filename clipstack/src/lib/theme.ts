@@ -11,8 +11,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type Theme = "light" | "dark" | "system";
 
-// 当前设置的主题（用于判断是否需要跟随系统实时更新）。
-let currentTheme: Theme = "light";
+// 当前设置的主题（用于判断是否需要跟随系统实时更新）。默认为跟随系统。
+let currentTheme: Theme = "system";
 // 最近一次探测到的系统真实明暗（供同步解析使用）。
 let systemTheme: "light" | "dark" = "light";
 

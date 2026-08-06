@@ -35,9 +35,11 @@ export default function App() {
       try {
         const settings = await getSettings();
         const t = settings.find((s) => s.key === "theme")?.value as Theme | undefined;
-        if (t) await applyTheme(t);
+        // 默认跟随系统（无已保存主题时）。
+        await applyTheme(t ?? "system");
       } catch {
-        /* 无主题设置时保持浅色默认 */
+        /* 读取失败时退化为跟随系统 */
+        await applyTheme("system");
       }
       // 订阅系统主题变化：仅在「跟随系统」时实时跟随 OS 切换。
       try {
