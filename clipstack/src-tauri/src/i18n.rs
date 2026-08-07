@@ -9,8 +9,6 @@
 
 use std::sync::Mutex;
 
-use crate::models::ContentType;
-
 /// 已解析的具体语言（不含 "system"）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
@@ -112,32 +110,3 @@ pub fn tray_empty(lang: Lang) -> &'static str {
     }
 }
 
-/// 托盘菜单条目类型短标签（无 emoji，置于预览文本前）。
-pub fn type_prefix(ct: ContentType, lang: Lang) -> &'static str {
-    match (ct, lang) {
-        // 简体中文
-        (ContentType::Text, Lang::ZhCn) => "[文]",
-        (ContentType::Link, Lang::ZhCn) => "[链]",
-        (ContentType::Code, Lang::ZhCn) => "[码]",
-        (ContentType::Image, Lang::ZhCn) => "[图]",
-        (ContentType::File, Lang::ZhCn) => "[件]",
-        // 繁體中文
-        (ContentType::Text, Lang::ZhTw) => "[文]",
-        (ContentType::Link, Lang::ZhTw) => "[鏈]",
-        (ContentType::Code, Lang::ZhTw) => "[碼]",
-        (ContentType::Image, Lang::ZhTw) => "[圖]",
-        (ContentType::File, Lang::ZhTw) => "[件]",
-        // 日本語
-        (ContentType::Text, Lang::Ja) => "[文]",
-        (ContentType::Link, Lang::Ja) => "[リンク]",
-        (ContentType::Code, Lang::Ja) => "[コード]",
-        (ContentType::Image, Lang::Ja) => "[画像]",
-        (ContentType::File, Lang::Ja) => "[ファイル]",
-        // English / Deutsch / Français（拉丁字母缩写，技术语境下通用）
-        (ContentType::Text, _) => "[T]",
-        (ContentType::Link, _) => "[L]",
-        (ContentType::Code, _) => "[C]",
-        (ContentType::Image, _) => "[I]",
-        (ContentType::File, _) => "[F]",
-    }
-}

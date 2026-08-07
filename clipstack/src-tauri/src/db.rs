@@ -167,9 +167,29 @@ pub fn get_history(conn: &Connection, limit: i64, pin_first: bool) -> rusqlite::
     rows.collect()
 }
 
-/// 读取最近若干条（置顶优先、时间倒序），供托盘菜单展示。
-pub fn get_recent(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<HistoryItem>> {
-    get_history(conn, limit, true)
+/// 托盘菜单专用：读取最近若干条，但排除「文件」类型（文件复制在文件管理器中粘贴更直观，
+/// 不适合在托盘里以文本/图标形式展示复制）。
+pub fn get_recent_tray(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<HistoryItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at \
+         FROM history WHERE content_type != 'file' ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
+    )?;
+    let rows = stmt.query_map([limit], |r| {
+        Ok(HistoryItem {
+            id: r.get(0)?,
+            content_type: parse_content_type(r.get::<_, String>(1)?),
+            content_text: r.get(2)?,
+            preview: r.get::<_, String>(2)?,
+            source_app: r.get(3)?,
+            size_bytes: r.get(4)?,
+            hash: r.get(5)?,
+            is_pinned: r.get::<_, i64>(6)? != 0,
+            is_favorite: r.get::<_, i64>(7)? != 0,
+            created_at: r.get(8)?,
+            deleted_at: None,
+        })
+    })?;
+    rows.collect()
 }
 
 /// 按 id 读取单条历史（托盘点击复制、命令读取原文等场景）。
@@ -630,6 +650,26 @@ mod tests {
         // 时间倒序：后插入的 b(200) 在前面
         assert_eq!(items[0].hash, "b");
         assert_eq!(items[1].hash, "a");
+    }
+
+    #[test]
+    fn get_recent_tray_excludes_file_type() {
+        let c = mem_db();
+        insert_or_bump(&c, &sample("text-a", 100)).unwrap();
+        // 直接插入一条「文件」类型，模拟 Finder 复制文件被捕获的场景。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, created_at) \
+             VALUES ('file', '/tmp/clipstack-packaging.md', NULL, 'Finder', 10, 'file-1', 200)",
+            [],
+        )
+        .unwrap();
+        let tray = get_recent_tray(&c, 100).unwrap();
+        // 托盘菜单应排除文件类型，仅保留文本条目。
+        assert_eq!(tray.len(), 1);
+        assert_eq!(tray[0].hash, "text-a");
+        assert_eq!(tray[0].content_type, crate::models::ContentType::Text);
+        // 反向校验：get_history 仍包含全部（主界面照常展示文件）。
+        assert_eq!(get_history(&c, 100, true).unwrap().len(), 2);
     }
 
     #[test]

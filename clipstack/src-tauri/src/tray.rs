@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
-use crate::i18n::{type_prefix, tray_about, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::i18n::{tray_about, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::models::ContentType;
 use crate::set_dock_visible;
 
 /// 托盘菜单展示历史记录条数的设置键与缺省值。
@@ -60,7 +61,7 @@ fn build_menu(
     let menu = Menu::new(app)?;
     let conn = db.conn.lock().expect("db lock poisoned");
     let limit = db::get_int_setting(&conn, TRAY_HISTORY_KEY, DEFAULT_TRAY_HISTORY);
-    let recent = db::get_recent(&conn, limit)?;
+    let recent = db::get_recent_tray(&conn, limit)?;
     // 解析菜单语言：显式选择具体语言时从设置直接取值（首帧即正确）；
     // system/未知则使用前端推送的已解析语言（MenuLang 状态，缺省英文）。
     let setting = db::get_string_setting(&conn, "language", "system");
@@ -75,13 +76,10 @@ fn build_menu(
         menu.append(&empty)?;
     } else {
         for it in &recent {
-            let label = format!(
-                "{} {}",
-                type_prefix(it.content_type, lang),
-                truncate(&it.preview, 40)
-            );
+            let label = truncate(&it.preview, 40);
             let id = format!("copy:{}", it.id);
-            let item = MenuItem::with_id(app, id, label, true, None::<&str>)?;
+            let icon = type_tray_icon(it.content_type)?;
+            let item = IconMenuItemBuilder::with_id(id, label).icon(icon).build(app)?;
             menu.append(&item)?;
         }
     }
@@ -212,6 +210,21 @@ fn handle_menu_event(
         }
         _ => {}
     }
+}
+
+/// 为托盘历史条目加载对应内容类型的图标（与首界面分类图标同字形）。
+fn type_tray_icon(ct: ContentType) -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    const ICON_TEXT: &[u8] = include_bytes!("../icons/menu-type-text.png");
+    const ICON_LINK: &[u8] = include_bytes!("../icons/menu-type-link.png");
+    const ICON_CODE: &[u8] = include_bytes!("../icons/menu-type-code.png");
+    const ICON_IMAGE: &[u8] = include_bytes!("../icons/menu-type-image.png");
+    let bytes = match ct {
+        ContentType::Link => ICON_LINK,
+        ContentType::Code => ICON_CODE,
+        ContentType::Image => ICON_IMAGE,
+        _ => ICON_TEXT, // text；file 在托盘历史中已排除，fallback 为文本图标
+    };
+    Ok(Image::from_bytes(bytes)?)
 }
 
 /// 截断过长的预览文本，超出部分以省略号结尾。
