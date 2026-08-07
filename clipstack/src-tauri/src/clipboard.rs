@@ -479,11 +479,58 @@ pub fn note_self_copy(state: &Arc<Mutex<MonitorState>>, text: &str) {
 
 /// 将文本写回系统剪贴板（供「复制」按钮、托盘点击使用）。
 ///
-/// 注意：arboard 的 `set_file_list` 为平台私有、`Set` builder 不暴露文件方法，
-/// 故图片 / 文件复制暂不在此支持（前端已对这两类禁用复制按钮）。
+/// 文件类型因 arboard `set_file_list` 为平台私有、`Set` builder 不暴露文件方法，暂不支持。
 pub fn set_clipboard_text(text: &str) -> Result<(), String> {
     let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
     cb.set_text(text.to_string()).map_err(|e| e.to_string())
+}
+
+/// 将 PNG 字节解码为 RGBA 像素（width, height, bytes），供写回剪贴板与去重 hash 使用。
+/// 解码失败返回 None（调用方按错误处理）。
+fn decode_png(png_bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    Some((
+        reader.info().width as usize,
+        reader.info().height as usize,
+        buf,
+    ))
+}
+
+/// 将 PNG 图片写回系统剪贴板（供「复制」按钮、托盘点击使用）。
+/// arboard 的 `set_image` 接收 RGBA 像素，故先解码 PNG → RGBA 再写入。
+pub fn set_clipboard_image(png_bytes: &[u8]) -> Result<(), String> {
+    let (width, height, rgba) =
+        decode_png(png_bytes).ok_or_else(|| "无法解码图片数据".to_string())?;
+    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+    let image_data = arboard::ImageData {
+        width,
+        height,
+        bytes: rgba.into(),
+    };
+    cb.set_image(image_data).map_err(|e| e.to_string())
+}
+
+/// 主动复制图片占位：把即将写回剪贴板的图片 hash 记入监控去重队列，
+/// 使其在 `DEDUP_WINDOW` 内被监控线程判定为重复而跳过捕获——
+/// 从而「选中图片重新复制」不会再次入列、也不会改写原复制时间。
+/// 应在 `set_clipboard_image` 之前调用。解码失败时静默（仅影响去重，不影响复制本身）。
+pub fn note_self_copy_image(state: &Arc<Mutex<MonitorState>>, png_bytes: &[u8]) {
+    if let Some((width, height, rgba)) = decode_png(png_bytes) {
+        let hash = content_hash(&RawContent::Image {
+            width,
+            height,
+            bytes: rgba,
+        });
+        let mut st = state.lock().unwrap();
+        st.recent.push_back((hash, Instant::now()));
+        if st.recent.len() > DEDUP_CAPACITY {
+            st.recent.pop_front();
+        }
+    }
 }
 
 // ===== 平台相关：剪贴板变更检测与来源应用 =====

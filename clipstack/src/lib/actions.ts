@@ -16,13 +16,19 @@ export function useItemActions() {
   const t = useT();
 
   const copy = async (item: HistoryItem) => {
-    // 图片 / 文件因平台 API 限制暂不支持一键复制：直接给出本地化提示，不再调用后端（避免后端硬编码中文报错）。
-    if (item.contentType === "image" || item.contentType === "file") {
+    // 文件类型因平台 API 限制暂不支持一键复制。
+    if (item.contentType === "file") {
       setToast(t("toast.copyUnsupported"));
       return;
     }
     try {
-      await api.copyItem(item.contentType, item.contentText);
+      if (item.contentType === "image") {
+        // 图片：从数据库读取二进制并解码后写回剪贴板。
+        await api.copyImage(item.id);
+      } else {
+        // 文本 / 链接 / 代码：直接写回文本。
+        await api.copyItem(item.contentType, item.contentText);
+      }
       setToast(t("toast.copied"));
     } catch (e) {
       setToast(t("toast.copyFailed", { error: String(e) }));

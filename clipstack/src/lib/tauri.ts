@@ -49,6 +49,10 @@ export const copyItem = (
 ): Promise<void> =>
   invoke<void>("copy_item", { contentType, contentText });
 
+/** 一键复制图片：从数据库读取 PNG 二进制，解码后写回系统剪贴板。 */
+export const copyImage = (id: number): Promise<void> =>
+  invoke<void>("copy_image", { id });
+
 /** 读取全部设置项。 */
 export const getSettings = (): Promise<Setting[]> =>
   invoke<Setting[]>("get_settings");

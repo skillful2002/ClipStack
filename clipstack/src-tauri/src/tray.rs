@@ -127,13 +127,35 @@ fn handle_menu_event(
             let conn = db.conn.lock().expect("db lock poisoned");
             if let Ok(item) = db::get_item(&conn, id_num) {
                 drop(conn);
-                // 先占位，避免监控线程把主动复制的内容重新捕获（改写时间 / 重复入列）。
-                crate::clipboard::note_self_copy(monitor, &item.content_text);
-                match crate::clipboard::set_clipboard_text(&item.content_text) {
-                    Ok(()) => {
-                        let _ = app.emit("tray-copied", serde_json::json!({ "id": id_num }));
+                if matches!(item.content_type, crate::models::ContentType::Image) {
+                    // 图片：从数据库读取 PNG 二进制，解码后写回剪贴板。
+                    let conn2 = db.conn.lock().expect("db lock poisoned");
+                    let blob: Option<Vec<u8>> = conn2
+                        .query_row(
+                            "SELECT content_blob FROM history WHERE id = ?",
+                            [id_num],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    drop(conn2);
+                    if let Some(png_bytes) = blob {
+                        crate::clipboard::note_self_copy_image(monitor, &png_bytes);
+                        match crate::clipboard::set_clipboard_image(&png_bytes) {
+                            Ok(()) => {
+                                let _ = app.emit("tray-copied", serde_json::json!({ "id": id_num }));
+                            }
+                            Err(e) => eprintln!("[clipstack] tray image copy failed: {e}"),
+                        }
                     }
-                    Err(e) => eprintln!("[clipstack] tray copy failed: {e}"),
+                } else {
+                    // 文本 / 链接 / 代码：直接写回文本。
+                    crate::clipboard::note_self_copy(monitor, &item.content_text);
+                    match crate::clipboard::set_clipboard_text(&item.content_text) {
+                        Ok(()) => {
+                            let _ = app.emit("tray-copied", serde_json::json!({ "id": id_num }));
+                        }
+                        Err(e) => eprintln!("[clipstack] tray copy failed: {e}"),
+                    }
                 }
             }
         }

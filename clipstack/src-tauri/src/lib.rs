@@ -199,6 +199,7 @@ pub fn run() {
             commands::get_item_blob,
             commands::get_trash_blob,
             commands::get_system_info,
+            commands::copy_image,
             commands::was_first_run,
         ])
         .run(tauri::generate_context!())

@@ -151,8 +151,9 @@ pub fn list_installed_apps() -> Vec<String> {
     crate::clipboard::list_installed_apps()
 }
 
-/// 一键复制：将条目内容写回系统剪贴板（文本 / 链接 / 代码）。
-/// 图片 / 文件因需二进制解析与平台文件 API，P3 暂不支持。
+/// 一键复制：将文本条目内容写回系统剪贴板（文本 / 链接 / 代码）。
+/// 图片请使用 `copy_image` 命令（需从数据库读取二进制并解码）。
+/// 文件因平台 API 限制暂不支持。
 #[tauri::command]
 pub fn copy_item(
     content_type: ContentType,
@@ -165,6 +166,28 @@ pub fn copy_item(
     // 先占位，避免监控线程把主动复制的内容重新捕获（改写时间 / 重复入列）。
     crate::clipboard::note_self_copy(&monitor, &content_text);
     crate::clipboard::set_clipboard_text(&content_text)
+}
+
+/// 一键复制图片：从数据库读取 PNG 二进制，解码后写回系统剪贴板。
+#[tauri::command]
+pub fn copy_image(
+    id: i64,
+    db: State<'_, DbState>,
+    monitor: State<'_, Arc<Mutex<MonitorState>>>,
+) -> Result<(), String> {
+    let conn = db.lock();
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT content_blob FROM history WHERE id = ?",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+    let png_bytes = blob.ok_or_else(|| "该图片无二进制数据".to_string())?;
+    // 先占位，避免监控线程把主动复制的图片重新捕获。
+    crate::clipboard::note_self_copy_image(&monitor, &png_bytes);
+    crate::clipboard::set_clipboard_image(&png_bytes)
 }
 
 /// 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。
