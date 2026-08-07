@@ -190,12 +190,18 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
     })
 }
 
-/// 用 arboard 读取剪贴板：文本优先，其次图片，再次文件。
+/// 用 arboard 读取剪贴板：文件优先，其次图片，再次文本。
+///
+/// 关键顺序：必须先判断 `file_list`，再判断 `get_text`。
+/// 在 macOS 上，Finder 复制文件时粘贴板会同时写入 `NSStringPboardType`，
+/// 但其内容仅含**文件名**（不含路径）；若先取文本，会把「文件」误判为「文本」——
+/// 导致文件以 `content_type=text` + `content_text=文件名` 入库，既无法一键粘贴为文件本身，
+/// 又会在类型筛选「文件」与托盘菜单中表现为文本。优先识别文件列表可彻底规避该误判。
 fn read_clipboard() -> Result<RawContent, arboard::Error> {
     let mut cb = Clipboard::new()?;
-    if let Ok(text) = cb.get_text() {
-        if !text.trim().is_empty() {
-            return Ok(RawContent::Text(text));
+    if let Ok(files) = cb.get().file_list() {
+        if !files.is_empty() {
+            return Ok(RawContent::Files(files));
         }
     }
     if let Ok(img) = cb.get_image() {
@@ -205,9 +211,9 @@ fn read_clipboard() -> Result<RawContent, arboard::Error> {
             bytes: img.bytes.to_vec(),
         });
     }
-    if let Ok(files) = cb.get().file_list() {
-        if !files.is_empty() {
-            return Ok(RawContent::Files(files));
+    if let Ok(text) = cb.get_text() {
+        if !text.trim().is_empty() {
+            return Ok(RawContent::Text(text));
         }
     }
     Ok(RawContent::None)
@@ -254,18 +260,22 @@ fn materialize(raw: &RawContent) -> (ContentType, String, String, Option<Vec<u8>
             )
         }
         RawContent::Files(p) => {
+            // content_text 仍为人类可读的路径拼接（用于列表预览与详情展示）；
+            // content_blob 存机器可读的 JSON 路径数组（用于一键复制，避免 ", " 分隔在含逗号 / 空格的文件名上歧义）。
+            // 文件内容不入库，库里只保存路径。
             let joined = p
                 .iter()
                 .map(|x| x.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            (
-                ContentType::File,
-                truncate(&joined, PREVIEW_MAX),
-                joined.clone(),
-                None,
-                joined.len(),
-            )
+            // 文件大小取各文件实际字节数之和（文件可能已不存在，best-effort 跳过）。
+            let size = p
+                .iter()
+                .filter_map(|x| std::fs::metadata(x).ok())
+                .map(|m| m.len())
+                .sum::<u64>() as usize;
+            let blob = serde_json::to_vec(p).ok();
+            (ContentType::File, truncate(&joined, PREVIEW_MAX), joined.clone(), blob, size)
         }
         RawContent::None => (ContentType::Text, String::new(), String::new(), None, 0),
     }
@@ -478,11 +488,17 @@ pub fn note_self_copy(state: &Arc<Mutex<MonitorState>>, text: &str) {
 }
 
 /// 将文本写回系统剪贴板（供「复制」按钮、托盘点击使用）。
-///
-/// 文件类型因 arboard `set_file_list` 为平台私有、`Set` builder 不暴露文件方法，暂不支持。
+/// 图片复制见 `set_clipboard_image`，文件复制见 `set_clipboard_file_list`。
 pub fn set_clipboard_text(text: &str) -> Result<(), String> {
     let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
     cb.set_text(text.to_string()).map_err(|e| e.to_string())
+}
+
+/// 将一组文件路径写回系统剪贴板（供「复制」按钮、托盘点击使用），
+/// 使目标可粘贴为文件本身（如访达 / 资源管理器中粘贴文件）。
+pub fn set_clipboard_file_list(paths: &[PathBuf]) -> Result<(), String> {
+    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set().file_list(paths).map_err(|e| e.to_string())
 }
 
 /// 将 PNG 字节解码为 RGBA 像素（width, height, bytes），供写回剪贴板与去重 hash 使用。
@@ -530,6 +546,31 @@ pub fn note_self_copy_image(state: &Arc<Mutex<MonitorState>>, png_bytes: &[u8]) 
         if st.recent.len() > DEDUP_CAPACITY {
             st.recent.pop_front();
         }
+    }
+}
+
+/// 主动复制文件占位：用与监控线程一致的 Files hash 记入监控去重队列，
+/// 使其在 `DEDUP_WINDOW` 内被判定为重复而跳过捕获——
+/// 从而「选中文件重新复制」不会再次入列、也不会改写原复制时间。
+/// 应在 `set_clipboard_file_list` 之前调用。
+pub fn note_self_copy_files(state: &Arc<Mutex<MonitorState>>, paths: &[PathBuf]) {
+    // 与监控线程读回的路径保持一致：arboard 写回剪贴板时会先 `canonicalize`，
+    // 监控线程 `file_list` 读回的也是规范化路径，故此处同样规范化以保证去重命中
+    // （避免「重新复制文件」被监控线程再次捕获而重复入列）。文件不存在时退化为原路径。
+    let canon: Vec<PathBuf> = paths
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
+    let effective = if canon.is_empty() {
+        paths.to_vec()
+    } else {
+        canon
+    };
+    let hash = content_hash(&RawContent::Files(effective));
+    let mut st = state.lock().unwrap();
+    st.recent.push_back((hash, Instant::now()));
+    if st.recent.len() > DEDUP_CAPACITY {
+        st.recent.pop_front();
     }
 }
 

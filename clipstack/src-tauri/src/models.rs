@@ -71,7 +71,7 @@ pub struct HistoryItem {
 pub struct NewItem {
     pub content_type: ContentType,
     pub content_text: String,
-    /// 图片二进制（按需落库，文本 / 文件为 None）。
+    /// 图片二进制（PNG）；文件则为 JSON 路径数组（不含文件内容）；文本 / 代码 / 链接为 None。
     pub content_blob: Option<Vec<u8>>,
     pub source_app: String,
     pub size_bytes: i64,

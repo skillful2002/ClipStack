@@ -42,6 +42,8 @@ pub fn open(app: &AppHandle) -> Result<AppDb, Box<dyn std::error::Error>> {
     let path = dir.join("clipstack.db");
     let conn = Connection::open(&path)?;
     migrate(&conn)?;
+    // 一次性迁移：纠正早期被误判为「文本」的文件条目（见函数注释）。
+    let _ = migrate_files_from_text(&conn);
     Ok(AppDb {
         conn: Mutex::new(conn),
     })
@@ -382,6 +384,206 @@ pub fn enforce_capacity(conn: &Connection, max: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 已知文件管理器来源（忽略大小写）。这些来源复制的「文本」极可能是文件名而非正文，
+/// 是判断一条 `text` 条目是否实为文件复制的强信号。
+const FILE_MANAGER_SOURCES: &[&str] = &[
+    "访达", "finder", "资源管理器", "explorer", "文件管理器", "nautilus", "dolphin",
+];
+
+/// 扫描时跳过的目录名（体积大或无意义的系统 / 依赖目录），避免一次性迁移拖垮启动。
+const MIGRATION_SKIP_DIRS: &[&str] = &[
+    "node_modules", "target", ".git", "dist", "build", ".next", "out", "vendor", "Library",
+    ".cache", ".cargo", ".rustup", ".npm", ".venv", "__pycache__", ".Trash", ".docker",
+    ".vagrant", "Pictures", "Movies", "Music",
+];
+
+/// 一次性迁移：将早期被误判为「文本」的文件条目纠正为「文件」类型。
+///
+/// 早期版本 `read_clipboard` 优先取文本，而 macOS 上 Finder 复制文件时 `NSStringPboardType`
+/// 仅含**文件名**（不含路径），导致文件以 `content_type='text'` + `content_text=文件名` 入库。
+/// 这些条目无法一键粘贴为文件本身，且在类型筛选「文件」与托盘菜单中均表现为文本。
+///
+/// 处理：对 `content_type='text'` 且「来源为文件管理器」或「content_text 本就是绝对路径列表」的行，
+/// 将文件名解析为真实路径（绝对路径直接验证，否则在用户主目录中按文件名查找），写入 `content_blob`
+/// （JSON 路径数组）并改为 `content_type='file'`，同时回填完整路径到 `content_text`（用于列表与详情展示）。
+/// 无法解析为真实文件的保持原样，绝不误伤纯文本。用设置项 `mig_file_v1` 保证仅执行一次（且无需时跳过）。
+pub fn migrate_files_from_text(conn: &Connection) -> rusqlite::Result<()> {
+    if get_string_setting(conn, "mig_file_v1", "") == "1" {
+        return Ok(());
+    }
+
+    // 快速预检：仅当存在可能需要纠正的 text 行时才执行（昂贵的目录扫描）。
+    let mut pre = conn.prepare(
+        "SELECT source_app, content_text FROM history WHERE content_type = 'text'",
+    )?;
+    let pre_rows = pre.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut needs = false;
+    for r in pre_rows {
+        let (source, text) = r?;
+        if FILE_MANAGER_SOURCES
+            .iter()
+            .any(|fm| source.eq_ignore_ascii_case(fm))
+            || is_abs_path_list(&text)
+        {
+            needs = true;
+            break;
+        }
+    }
+    drop(pre);
+    if !needs {
+        let _ = update_setting(conn, "mig_file_v1", "1");
+        return Ok(());
+    }
+
+    // 预构建「文件名 -> 路径」索引（带容量与深度上限，避免超大目录拖垮启动）。
+    let mut name_index: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        build_name_index(&std::path::PathBuf::from(home), &mut name_index, 5, 250_000);
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT id, content_text, source_app FROM history WHERE content_type = 'text'",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
+    let items: Vec<(i64, String, String)> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    for (id, content_text, source_app) in items {
+        let from_fm = FILE_MANAGER_SOURCES
+            .iter()
+            .any(|fm| source_app.eq_ignore_ascii_case(fm));
+        if !from_fm && !is_abs_path_list(&content_text) {
+            continue;
+        }
+        let tokens: Vec<&str> = content_text
+            .split(", ")
+            .filter(|s| !s.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        let mut resolved: Vec<String> = Vec::with_capacity(tokens.len());
+        let mut ok = true;
+        for tok in tokens {
+            match resolve_token(tok, &name_index) {
+                Some(p) => resolved.push(p),
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok && !resolved.is_empty() {
+            let size: i64 = resolved
+                .iter()
+                .filter_map(|p| std::fs::metadata(p).ok())
+                .map(|m| m.len() as i64)
+                .sum();
+            let joined = resolved.join(", ");
+            if let Ok(blob) = serde_json::to_vec(&resolved) {
+                conn.execute(
+                    "UPDATE history SET content_type = 'file', content_text = ?, content_blob = ?, size_bytes = ? WHERE id = ?",
+                    params![joined, blob, size, id],
+                )?;
+            }
+        }
+    }
+
+    let _ = update_setting(conn, "mig_file_v1", "1");
+    Ok(())
+}
+
+/// content_text 是否本身就是「绝对路径列表」（每个 token 都是已存在的绝对路径）。
+fn is_abs_path_list(s: &str) -> bool {
+    let tokens: Vec<&str> = s.split(", ").filter(|t| !t.is_empty()).collect();
+    if tokens.is_empty() {
+        return false;
+    }
+    tokens
+        .iter()
+        .all(|t| std::path::Path::new(t).is_absolute() && std::path::Path::new(t).exists())
+}
+
+/// 将单个 token 解析为真实存在的文件路径：
+/// - 已是绝对且存在的路径 → 直接规范化返回；
+/// - 否则在 `name_index`（按文件名预建索引）中查找同名文件 → 返回其规范化路径；
+/// - 都找不到 → None。
+fn resolve_token(
+    tok: &str,
+    name_index: &std::collections::HashMap<String, std::path::PathBuf>,
+) -> Option<String> {
+    let p = std::path::Path::new(tok);
+    if p.is_absolute() {
+        if p.exists() {
+            return std::fs::canonicalize(p)
+                .ok()
+                .map(|c| c.to_string_lossy().into_owned())
+                .or_else(|| Some(tok.to_string()));
+        }
+        return None;
+    }
+    let fname = p.file_name()?.to_string_lossy().into_owned();
+    if let Some(found) = name_index.get(&fname) {
+        if found.exists() {
+            return std::fs::canonicalize(found)
+                .ok()
+                .map(|c| c.to_string_lossy().into_owned())
+                .or_else(|| Some(found.to_string_lossy().into_owned()));
+        }
+    }
+    None
+}
+
+/// 在 `root` 下构建「文件名 -> 路径」索引（深度优先，跳过重型 / 系统 / 隐藏目录，受容量与深度限制）。
+fn build_name_index(
+    root: &std::path::Path,
+    index: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    max_depth: usize,
+    cap: usize,
+) {
+    fn walk(
+        dir: &std::path::Path,
+        index: &mut std::collections::HashMap<String, std::path::PathBuf>,
+        depth: usize,
+        max_depth: usize,
+        cap: usize,
+    ) {
+        if depth > max_depth || index.len() >= cap {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            if index.len() >= cap {
+                return;
+            }
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                // 跳过系统 / 依赖 / 隐藏目录，避免一次性迁移扫描过慢。
+                if MIGRATION_SKIP_DIRS.contains(&name) || name.starts_with('.') {
+                    continue;
+                }
+                walk(&path, index, depth + 1, max_depth, cap);
+            } else if file_type.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    // 仅记录首次出现的同名文件，避免索引被海量同名小文件撑爆。
+                    index.entry(name.to_string()).or_insert(path);
+                }
+            }
+        }
+    }
+    walk(root, index, 0, max_depth, cap);
+}
+
 /// 当前毫秒时间戳。
 pub fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -577,5 +779,80 @@ mod tests {
         // 无法解析时回退 default
         update_setting(&c, "tray_history_count", "not-a-number").unwrap();
         assert_eq!(get_int_setting(&c, "tray_history_count", 30), 30);
+    }
+
+    #[test]
+    fn is_abs_path_list_detects_real_paths() {
+        let tmp = std::env::temp_dir().join(format!("clipstack_mig_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let f = tmp.join("a.txt");
+        let _ = std::fs::write(&f, b"x");
+        assert!(is_abs_path_list(f.to_str().unwrap()));
+        // 纯文件名（相对）不应判定为绝对路径列表
+        assert!(!is_abs_path_list("just a name.txt"));
+        // 空串
+        assert!(!is_abs_path_list(""));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_token_finds_existing_file_by_name() {
+        let tmp = std::env::temp_dir().join(format!("clipstack_mig2_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let f = tmp.join("wanted.md");
+        let _ = std::fs::write(&f, b"x");
+        let mut idx = std::collections::HashMap::new();
+        build_name_index(&tmp, &mut idx, 3, 1000);
+        let resolved = resolve_token("wanted.md", &idx);
+        assert!(resolved.is_some());
+        assert!(resolved.unwrap().ends_with("wanted.md"));
+        // 不存在的文件名解析为 None
+        assert!(resolve_token("nope.md", &idx).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn migrate_files_from_text_reclassifies_finder_copies() {
+        let c = mem_db();
+        // 模拟早期误判：来自 Finder 的文本条目，content_text 仅含文件名。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, created_at) \
+             VALUES ('text', 'demo.md', NULL, '访达', 0, 'h1', 100)",
+            [],
+        )
+        .unwrap();
+        // 一条纯文本（非文件管理器来源）应保持原样。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, created_at) \
+             VALUES ('text', 'hello world', NULL, 'TextEdit', 0, 'h2', 200)",
+            [],
+        )
+        .unwrap();
+
+        // 在临时目录放一个同名文件，并把 HOME 临时指向该目录，供迁移按文件名解析。
+        let tmp = std::env::temp_dir().join(format!("clipstack_mig3_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let _ = std::fs::write(tmp.join("demo.md"), b"hello");
+        // 重定向 HOME 指向 tmp（含 demo.md），使 Finder 来源的文件名可被解析为真实路径。
+        let _ = std::env::set_var("HOME", &tmp);
+        migrate_files_from_text(&c).unwrap();
+        let _ = std::env::remove_var("HOME");
+
+        let mut types = c
+            .prepare("SELECT content_type, content_text FROM history ORDER BY id")
+            .unwrap();
+        let rows: Vec<(String, String)> = types
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        // Finder 来源的文件名被解析为真实路径 → 纠正为 file 类型。
+        assert_eq!(rows[0].0, "file");
+        assert!(rows[0].1.ends_with("demo.md"));
+        // 纯文本（非文件管理器来源）保持 text，绝不误伤。
+        assert_eq!(rows[1].0, "text");
+        // 迁移标记已写入
+        assert_eq!(get_string_setting(&c, "mig_file_v1", ""), "1");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

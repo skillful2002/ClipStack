@@ -16,15 +16,13 @@ export function useItemActions() {
   const t = useT();
 
   const copy = async (item: HistoryItem) => {
-    // 文件类型因平台 API 限制暂不支持一键复制。
-    if (item.contentType === "file") {
-      setToast(t("toast.copyUnsupported"));
-      return;
-    }
     try {
       if (item.contentType === "image") {
         // 图片：从数据库读取二进制并解码后写回剪贴板。
         await api.copyImage(item.id);
+      } else if (item.contentType === "file") {
+        // 文件：从数据库读取路径列表，写回系统剪贴板文件列表（可粘贴为文件本身）。
+        await api.copyFile(item.id);
       } else {
         // 文本 / 链接 / 代码：直接写回文本。
         await api.copyItem(item.contentType, item.contentText);

@@ -53,6 +53,10 @@ export const copyItem = (
 export const copyImage = (id: number): Promise<void> =>
   invoke<void>("copy_image", { id });
 
+/** 一键复制文件：从数据库读取路径列表，写回系统剪贴板文件列表（可粘贴为文件本身）。 */
+export const copyFile = (id: number): Promise<void> =>
+  invoke<void>("copy_file", { id });
+
 /** 读取全部设置项。 */
 export const getSettings = (): Promise<Setting[]> =>
   invoke<Setting[]>("get_settings");

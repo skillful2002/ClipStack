@@ -3,6 +3,7 @@
 // 命名：`动词_名词`（见开发规范）。入参 / 出参为 `models.rs` 的 serde 结构体。
 // 错误统一转 `String`（Tauri 要求命令错误可序列化），便于前端处理。
 
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -190,6 +191,47 @@ pub fn copy_image(
     crate::clipboard::set_clipboard_image(&png_bytes)
 }
 
+/// 一键复制文件：从数据库读取路径列表（存于 content_blob，JSON 数组；
+/// 旧格式则可能以 ", " 拼在 content_text 中），写回系统剪贴板文件列表，可粘贴为文件本身。
+#[tauri::command]
+pub fn copy_file(
+    id: i64,
+    db: State<'_, DbState>,
+    monitor: State<'_, Arc<Mutex<MonitorState>>>,
+) -> Result<(), String> {
+    let conn = db.lock();
+    let row: (Option<Vec<u8>>, String) = conn
+        .query_row(
+            "SELECT content_blob, content_text FROM history WHERE id = ?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+    let (blob, text) = row;
+    let paths = paths_from_storage(blob.as_deref(), &text);
+    if paths.is_empty() {
+        return Err("该条目无可复制的文件路径".to_string());
+    }
+    // 先占位，避免监控线程把主动复制的文件重新捕获。
+    crate::clipboard::note_self_copy_files(&monitor, &paths);
+    crate::clipboard::set_clipboard_file_list(&paths)
+}
+
+/// 从存储中还原文件路径列表：优先取 content_blob 中的 JSON 数组；
+/// 缺失或解析失败时回退到按 ", " 拆分 content_text（兼容旧数据）。
+pub(crate) fn paths_from_storage(blob: Option<&[u8]>, text: &str) -> Vec<PathBuf> {
+    if let Some(b) = blob {
+        if let Ok(paths) = serde_json::from_slice::<Vec<String>>(b) {
+            return paths.into_iter().map(PathBuf::from).collect();
+        }
+    }
+    text.split(", ")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。
 /// 文本 / 链接 / 代码类条目无二进制，返回错误。
 #[tauri::command]
@@ -253,4 +295,39 @@ pub fn get_system_info() -> SystemInfo {
 #[tauri::command]
 pub fn was_first_run(flag: State<'_, Arc<AtomicBool>>) -> bool {
     flag.load(Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_from_storage_prefers_json_blob() {
+        let json = serde_json::to_vec(&vec!["/a.txt", "/b/c.png"]).unwrap();
+        let paths = paths_from_storage(Some(&json), "/ignored, fallback");
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/a.txt"), PathBuf::from("/b/c.png")]
+        );
+    }
+
+    #[test]
+    fn paths_from_storage_falls_back_to_comma_split() {
+        // 无 blob 时回退到按 ", " 拆分 content_text（兼容旧数据）。
+        let paths = paths_from_storage(None, "/x.txt, /y.txt");
+        assert_eq!(paths, vec![PathBuf::from("/x.txt"), PathBuf::from("/y.txt")]);
+    }
+
+    #[test]
+    fn paths_from_storage_bad_blob_falls_back() {
+        // blob 非合法 JSON 时回退到 ", " 拆分，不报错。
+        let paths = paths_from_storage(Some(b"not json"), "/only.txt");
+        assert_eq!(paths, vec![PathBuf::from("/only.txt")]);
+    }
+
+    #[test]
+    fn paths_from_storage_empty_yields_empty() {
+        let paths = paths_from_storage(None, "");
+        assert!(paths.is_empty());
+    }
 }
