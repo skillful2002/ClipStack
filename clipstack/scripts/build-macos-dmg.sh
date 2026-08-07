@@ -26,12 +26,9 @@ VERSION="0.1.0"
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
 TARGET="${1:-$HOST_TRIPLE}"
 
-# 跨架构构建时 cargo 产物目录为 src-tauri/target/<triple>/release，本机架构为 src-tauri/target/release
-if [[ "$TARGET" == "$HOST_TRIPLE" ]]; then
-  CARGO_DIR="src-tauri/target/release"
-else
-  CARGO_DIR="src-tauri/target/$TARGET/release"
-fi
+# 跨架构构建时 cargo 产物目录统一为 src-tauri/target/<triple>/release
+# （即使 TARGET 等于本机 triple，因为脚本总是显式传 --target，产物也在 triple 子目录）
+CARGO_DIR="src-tauri/target/$TARGET/release"
 
 # 产物名后缀
 case "$TARGET" in
