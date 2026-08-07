@@ -20,6 +20,8 @@ serde_json = "1"
 arboard = "3"            # 跨平台剪贴板读写（P1 捕获引擎：get_text/get_image/get_file）
 rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 持久化（P2）
 png = "0.17"                        # 图片预览：把 arboard 原始 RGBA 像素编码为 PNG 存储（P8）
+image = "0.25"                       # 把截图软件写入的 BMP/CF_BITMAP/CF_DIB 解码为 RGBA（Windows 图片捕获补全）
+clipboard-win = "5"                  # 直接读 arboard 3.x 未覆盖的 CF_BITMAP / CF_DIB 剪贴板图片格式（Windows）
 tauri-plugin-global-shortcut = "2"  # P4 全局快捷键（唤起主界面）
 tauri-plugin-autostart = "2"        # P6 开机自启开关
 

@@ -4,7 +4,9 @@
 //       → 来源应用过滤（忽略列表）→ 写入 SQLite（`history` 表）→ 广播 `clipboard-changed`。
 //
 // 关于「事件驱动」：
-//   - Windows 有系统级 `WM_CLIPBOARDUPDATE` 事件（后续阶段接入 `AddClipboardFormatListener`）。
+//   - Windows 采用系统级 `GetClipboardSequenceNumber()`：任意进程写入剪贴板时该序号自增，
+//     无需打开/读取剪贴板内容即可判断变更（与 macOS 的 `NSPasteboard.changeCount` 语义一致）。
+//     序列号为 0 的极少数情况下回退为「读取内容计算 hash」比对，保证不漏检。
 //   - macOS 没有公开的剪贴板变更通知，业界（Maccy / Paste 等）均通过轮询
 //     `NSPasteboard.changeCount` 实现。此处采用 300ms 间隔的 changeCount 比对——
 //     这是一次整数比较，绝非忙等循环，符合「不阻塞、不空转」的设计意图。
@@ -197,7 +199,17 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
 /// 但其内容仅含**文件名**（不含路径）；若先取文本，会把「文件」误判为「文本」——
 /// 导致文件以 `content_type=text` + `content_text=文件名` 入库，既无法一键粘贴为文件本身，
 /// 又会在类型筛选「文件」与托盘菜单中表现为文本。优先识别文件列表可彻底规避该误判。
+///
+/// Windows 图片捕获补全：arboard 3.x 的 `get_image` 只读取 `PNG` 与 `CF_DIBV5` 两种格式，
+/// 对部分截图软件（如 Windows 截图工具、Snipaste 等）写入的 `CF_BITMAP` / `CF_DIB` 无法识别，
+/// 导致截图被判定为「无内容」而漏捕获。故 Windows 端先以 Win32 直接读取全部图片格式，命中即返回。
 fn read_clipboard() -> Result<RawContent, arboard::Error> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(img) = read_image_win32() {
+            return Ok(img);
+        }
+    }
     let mut cb = Clipboard::new()?;
     if let Ok(files) = cb.get().file_list() {
         if !files.is_empty() {
@@ -217,6 +229,119 @@ fn read_clipboard() -> Result<RawContent, arboard::Error> {
         }
     }
     Ok(RawContent::None)
+}
+
+/// Windows 专用：用 Win32（clipboard-win）读取 arboard 未覆盖的剪贴板图片格式。
+/// 优先 `CF_BITMAP`（截图为 GDI 位图，最常被漏掉），其次 `CF_DIB`。
+/// 两者都先取原始字节、再交给 `image` crate 解码为 RGBA（与 `arboard` 的 RGBA 像素格式一致）。
+/// 打开剪贴板失败时返回 None，交由下方 arboard 路径兜底（其后再回退到文本）。
+#[cfg(target_os = "windows")]
+fn read_image_win32() -> Option<RawContent> {
+    use clipboard_win::formats;
+    use clipboard_win::raw;
+
+    if raw::open().is_err() {
+        return None;
+    }
+    // 无论以何种路径返回，都要关闭剪贴板，否则会占用导致 arboard 后续 `Clipboard::new()` 打开失败。
+    let _guard = ClipboardCloseGuard;
+
+    // 1) CF_BITMAP：GDI 位图。clipboard-win 的 get_bitmap 直接产出标准 BMP 文件字节。
+    if raw::is_format_avail(formats::CF_BITMAP) {
+        let mut bmp = Vec::new();
+        if raw::get_bitmap(&mut bmp).is_ok() {
+            match bmp_to_rgba(&bmp) {
+                Some((w, h, bytes)) => {
+                    return Some(RawContent::Image {
+                        width: w,
+                        height: h,
+                        bytes,
+                    })
+                }
+                None => eprintln!("[clipstack] CF_BITMAP 存在但 BMP 解码失败（len={}）", bmp.len()),
+            }
+        } else {
+            eprintln!("[clipstack] CF_BITMAP 存在但 get_bitmap 读取失败");
+        }
+    }
+
+    // 2) CF_DIB：设备无关位图（无 BITMAPFILEHEADER）。包成 BMP 文件头后交给 image 解码。
+    if raw::is_format_avail(formats::CF_DIB) {
+        let mut data = Vec::new();
+        if raw::get_vec(formats::CF_DIB, &mut data).is_ok() {
+            match dib_to_rgba(&data) {
+                Some((w, h, bytes)) => {
+                    return Some(RawContent::Image {
+                        width: w,
+                        height: h,
+                        bytes,
+                    })
+                }
+                None => eprintln!("[clipstack] CF_DIB 存在但解码失败（len={}）", data.len()),
+            }
+        } else {
+            eprintln!("[clipstack] CF_DIB 存在但 get_vec 读取失败");
+        }
+    }
+
+    None
+}
+
+/// 读取剪贴板后确保调用 `CloseClipboard`，避免长期占用剪贴板句柄。
+#[cfg(target_os = "windows")]
+struct ClipboardCloseGuard;
+
+#[cfg(target_os = "windows")]
+impl Drop for ClipboardCloseGuard {
+    fn drop(&mut self) {
+        let _ = clipboard_win::raw::close();
+    }
+}
+
+/// 把标准 BMP 文件字节解码为 RGBA 像素（与 arboard 的 ImageData 像素格式一致：行主序、自上而下）。
+#[cfg(target_os = "windows")]
+fn bmp_to_rgba(bmp: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    let img = image::load_from_memory_with_format(bmp, image::ImageFormat::Bmp).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+    Some((w, h, rgba.into_raw()))
+}
+
+/// 把 `CF_DIB` 原始字节（BITMAPINFOHEADER + 调色板/掩码 + 像素）包成标准 BMP 文件后再解码为 RGBA。
+/// 处理 `BI_BITFIELDS`（16/32 位带位掩码，无调色板、仅有 3 个 DWORD 掩码）与带调色板的低位深情况。
+#[cfg(target_os = "windows")]
+fn dib_to_rgba(dib: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    if dib.len() < 40 {
+        return None;
+    }
+    let bi_size = u32::from_le_bytes(dib[0..4].try_into().ok()?) as usize;
+    if bi_size < 40 || bi_size > dib.len() {
+        return None;
+    }
+    let bi_bit_count = u16::from_le_bytes(dib[14..16].try_into().ok()?) as u32;
+    let bi_compression = u32::from_le_bytes(dib[16..20].try_into().ok()?);
+    let bi_clr_used = u32::from_le_bytes(dib[32..36].try_into().ok()?) as usize;
+
+    // 计算信息头之后、像素数据之前的额外字节数（调色板或 BI_BITFIELDS 的位掩码）。
+    let extra = if bi_compression == 3 {
+        // BI_BITFIELDS：3 个 DWORD 掩码（12 字节），无调色板。
+        12
+    } else if bi_clr_used > 0 {
+        bi_clr_used * 4
+    } else if bi_bit_count < 24 {
+        1 << bi_bit_count
+    } else {
+        0
+    };
+
+    let data_offset = 14 + bi_size + extra;
+    let mut bmp = Vec::with_capacity(data_offset + dib.len());
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&((data_offset + dib.len()) as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0u8; 4]); // 保留字段
+    bmp.extend_from_slice(&(data_offset as u32).to_le_bytes());
+    bmp.extend_from_slice(dib);
+    bmp_to_rgba(&bmp)
 }
 
 /// 类型识别：文本 →（链接 / 代码）/ 文本；其余按载体识别。
@@ -381,9 +506,15 @@ pub fn list_installed_apps() -> Vec<String> {
             collect_app_names(&dir, &mut names, 0);
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        // 非 macOS 暂不支持枚举，交由前端回退到手动输入。
+        // Windows 枚举「拥有可见主窗口」的运行中进程（即用户实际会复制的应用），
+        // 与监控线程 current_app_name() 返回的 exe 名同源，确保忽略匹配一致。
+        collect_running_app_names(&mut names);
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        // 非 macOS/Windows 暂不支持枚举，交由前端回退到手动输入。
         let _ = &mut names;
     }
     let result: Vec<String> = names.into_iter().collect();
@@ -420,6 +551,87 @@ fn collect_app_names(dir: &std::path::Path, out: &mut std::collections::BTreeSet
             collect_app_names(&path, out, depth + 1);
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn collect_running_app_names(out: &mut std::collections::BTreeSet<String>) {
+    use std::collections::HashSet;
+    use std::ffi::c_void;
+
+    // 1) 收集「拥有可见、无主窗口」的进程 PID —— 这些才是用户会想要忽略的「应用」主窗口。
+    type WNDENUMPROC = unsafe extern "system" fn(*mut c_void, isize) -> i32;
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(lpEnumFunc: WNDENUMPROC, lParam: isize) -> i32;
+        fn IsWindowVisible(hWnd: *mut c_void) -> i32;
+        fn GetWindow(hWnd: *mut c_void, uCmd: u32) -> *mut c_void;
+        fn GetWindowThreadProcessId(hWnd: *mut c_void, lpdwProcessId: *mut u32) -> u32;
+    }
+    const GW_OWNER: u32 = 4;
+
+    let mut visible_pids: HashSet<u32> = HashSet::new();
+    unsafe extern "system" fn enum_cb(hwnd: *mut c_void, lparam: isize) -> i32 {
+        let set = &mut *(lparam as *mut HashSet<u32>);
+        if IsWindowVisible(hwnd) != 0 && GetWindow(hwnd, GW_OWNER).is_null() {
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid != 0 {
+                set.insert(pid);
+            }
+        }
+        1
+    }
+    unsafe {
+        EnumWindows(enum_cb, &mut visible_pids as *mut _ as isize);
+    }
+
+    // 2) 枚举全部进程，取 exe 名；PID 落在可见窗口集合中才纳入（去重、按名排序由 BTreeSet 完成）。
+    #[repr(C)]
+    struct PROCESSENTRY32W {
+        dwSize: u32,
+        cntUsage: u32,
+        th32ProcessID: u32,
+        th32DefaultHeapID: usize,
+        th32ModuleID: u32,
+        cntThreads: u32,
+        th32ParentProcessID: u32,
+        pcPriClassBase: i32,
+        dwFlags: u32,
+        szExeFile: [u16; 260],
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(dwFlags: u32, th32ProcessID: u32) -> *mut c_void;
+        fn CloseHandle(hObject: *mut c_void) -> i32;
+        fn Process32FirstW(hSnapshot: *mut c_void, lppe: *mut PROCESSENTRY32W) -> i32;
+        fn Process32NextW(hSnapshot: *mut c_void, lppe: *mut PROCESSENTRY32W) -> i32;
+    }
+    const TH32CS_SNAPPROCESS: u32 = 0x00000002;
+
+    let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if (snap as isize) == -1 {
+        return;
+    }
+    let mut pe: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    pe.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+    if unsafe { Process32FirstW(snap, &mut pe) } != 0 {
+        loop {
+            let nul = pe
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(0);
+            let name = String::from_utf16_lossy(&pe.szExeFile[..nul]);
+            let trimmed = name.trim_end_matches(".exe");
+            if !trimmed.is_empty() && visible_pids.contains(&pe.th32ProcessID) {
+                out.insert(trimmed.to_string());
+            }
+            if unsafe { Process32NextW(snap, &mut pe) } == 0 {
+                break;
+            }
+        }
+    }
+    unsafe { CloseHandle(snap) };
 }
 
 #[cfg(target_os = "macos")]
@@ -596,14 +808,112 @@ fn current_app_name() -> String {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn current_change_count() -> Option<i64> {
-    // TODO(P4): Windows 接入 AddClipboardFormatListener 实现真正的事件驱动。
+    // Windows 没有 NSPasteboard.changeCount，但系统提供等价的「剪贴板序列号」：
+    // 任意进程写入剪贴板时该序号都会自增。无需打开/读取剪贴板内容即可判断「是否发生变化」，
+    // 与 macOS 的 changeCount 语义一致，开销极低（整数比较，不读内容）。
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetClipboardSequenceNumber() -> u32;
+    }
+    let seq = unsafe { GetClipboardSequenceNumber() };
+    if seq != 0 {
+        return Some(seq as i64);
+    }
+    // 序列号为 0（本进程尚未触发剪贴板序列号维护，极少见）时，回退为读取内容计算 hash，
+    // 保证不会漏检早期复制。内容为空时返回 None（不视为变更）。
+    match read_clipboard() {
+        Ok(raw) if !matches!(raw, RawContent::None) => Some(content_hash(&raw) as i64),
+        _ => None,
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn current_change_count() -> Option<i64> {
+    // 其它平台（如 Linux）暂未实现事件驱动的变更检测。
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn current_app_name() -> String {
+    use std::ffi::c_void;
+
+    // 用「剪贴板所有者窗口」反查来源进程：GetClipboardOwner 返回最后一次向剪贴板写入数据的
+    // 窗口句柄（即来源应用的窗口），不打开剪贴板、不影响后续 arboard 读取，是最准确的来源识别。
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetClipboardOwner() -> *mut c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut c_void, lpdwProcessId: *mut u32) -> u32;
+    }
+
+    let owner = unsafe { GetClipboardOwner() };
+    if owner.is_null() {
+        return "unknown".to_string();
+    }
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(owner, &mut pid) };
+    match resolve_exe_name(pid) {
+        Some(name) => name,
+        None => "unknown".to_string(),
+    }
+}
+
+/// 由进程 PID 解析其 exe 文件名（去 .exe 后缀），用于来源应用识别；失败返回 None。
+#[cfg(target_os = "windows")]
+fn resolve_exe_name(pid: u32) -> Option<String> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStringExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut c_void;
+        fn CloseHandle(hObject: *mut c_void) -> i32;
+        fn QueryFullProcessImageNameW(
+            hProcess: *mut c_void,
+            dwFlags: u32,
+            lpExeName: *mut u16,
+            lpdwSize: *mut u32,
+        ) -> i32;
+    }
+
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+
+    if pid == 0 {
+        return None;
+    }
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let name = {
+        let mut buf = [0u16; 1024];
+        let mut size: u32 = buf.len() as u32;
+        let ok = unsafe { QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size) };
+        if ok != 0 && size > 0 {
+            let path = std::ffi::OsString::from_wide(&buf[..size as usize])
+                .to_string_lossy()
+                .to_string();
+            std::path::Path::new(&path)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone())
+        } else {
+            String::new()
+        }
+    };
+    unsafe { CloseHandle(handle) };
+    if name.is_empty() {
+        None
+    } else {
+        // 去掉 .exe 后缀，与「忽略应用」的小写匹配规则对齐（如 msedge、Snipaste、notepad）。
+        Some(name.trim_end_matches(".exe").to_string())
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn current_app_name() -> String {
+    // Linux 等暂未接入来源应用识别。
     "unknown".to_string()
 }
 
@@ -713,5 +1023,52 @@ mod tests {
         let expected = content_hash(&RawContent::Text(text.to_string()));
         let st = state.lock().unwrap();
         assert!(st.recent.iter().any(|(h, _)| *h == expected));
+    }
+}
+
+/// Windows 专用：验证「只写 CF_BITMAP 的截图软件」能被正确捕获为图片。
+/// 这一类格式 arboard 3.x 读不到（它只看 PNG / CF_DIBV5），正是此前截图丢失的根因。
+#[cfg(all(test, target_os = "windows"))]
+mod win_capture_tests {
+    use super::*;
+    use image::{DynamicImage, ImageBuffer, Rgb, ImageFormat};
+
+    #[test]
+    fn captures_cf_bitmap_like_screenshot_tool() {
+        // 构造一张 2×2 红色 BMP，模拟截图软件仅写入 CF_BITMAP 的场景。
+        let img = ImageBuffer::<Rgb<u8>, Vec<u8>>::from_pixel(2, 2, Rgb([255, 0, 0]));
+        let dyn_img = DynamicImage::ImageRgb8(img);
+        let mut bmp: Vec<u8> = Vec::new();
+        dyn_img
+            .write_to(&mut std::io::Cursor::new(&mut bmp), ImageFormat::Bmp)
+            .expect("encode bmp");
+
+        // 清空剪贴板后再只写入 CF_BITMAP，避免既有其它格式（PNG/DIBV5）干扰断言。
+        clipboard_win::raw::open().expect("open clipboard");
+        clipboard_win::empty().expect("empty clipboard");
+        clipboard_win::raw::set_bitmap(&bmp)
+            .expect("set CF_BITMAP to clipboard");
+        clipboard_win::raw::close().expect("close clipboard");
+
+        let raw = read_clipboard().expect("read_clipboard should succeed");
+        match raw {
+            RawContent::Image { width, height, bytes } => {
+                assert_eq!((width, height), (2, 2));
+                assert_eq!(bytes.len(), 2 * 2 * 4, "应为 RGBA，每像素 4 字节");
+            }
+            _ => panic!("期望捕获为 Image，实际不是 Image 变体（截图丢失的根因未修复）"),
+        }
+    }
+
+    #[test]
+    fn resolve_exe_name_returns_self() {
+        // 验证 Windows 来源识别的核心：由 PID 反查 exe 名。
+        // 用测试进程自身 PID，确定性地证明 Win32 解析逻辑可用（不再是 "unknown"）。
+        let pid = std::process::id();
+        let name = resolve_exe_name(pid).expect("应能由 PID 解析出本进程 exe 名");
+        assert!(!name.is_empty(), "exe 名不应为空");
+        assert_ne!(name, "unknown", "不应回退为 unknown");
+        // 测试二进制名形如 clipstack-<hash>（含连字符），至少验证它不是 unknown 且非空即可。
+        println!("[clipstack-test] resolve_exe_name({pid}) = {name}");
     }
 }

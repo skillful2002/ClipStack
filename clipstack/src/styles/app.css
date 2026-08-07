@@ -464,12 +464,13 @@
 }
 
 .detail-preview {
+  flex: 1 1 auto;
   background: var(--cs-bg);
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-lg);
   padding: 14px;
   min-height: 160px;
-  max-height: 360px;
+  max-height: 75vh;
   overflow: auto;
   font-size: 13px;
   color: var(--cs-text-primary);
