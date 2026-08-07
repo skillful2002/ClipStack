@@ -259,3 +259,12 @@ ignored_apps( name TEXT );
 - P0–P8 已全部落地，P8 之后还完成一系列 bug 修复与功能增强（主题三轮修复、置顶/收藏不被覆盖、重新复制不入列、复制报错修复、托盘历史条数 + 死锁修复、忽略应用增强、系统中文名显示与选择 + 设置页卡顿修复、设置布局、深色输入框、托盘菜单项图标、主题默认跟随系统、主界面「清除全部」、自定义应用图标）。
 - 完整记录与 commit 引用见 `docs/clipstack-build-steps.md` 的「2026-08-06 · P8 之后的修复与增强」条目。
 - 图标在 dev/build 的行为差异（Dock 不显示自定义图标、编译期嵌入需 touch 配置重嵌）见 `docs/clipstack-packaging.md` 第七节。
+
+### 9.4 进展更新（截至 2026-08-07）
+- **文件一键复制**：库内 `content_blob` 仅存 JSON 路径数组（不含文件内容），`copy_file` 命令经 arboard `set().file_list()` 把真实文件 URL 写回，可在访达 / 文件管理器粘贴为文件本身。捕获顺序修正——`read_clipboard` 改为 `file_list` 优先于 `get_text`（修复 macOS Finder 复制文件时 `get_text` 只返回文件名、被误判为文本的三连 bug：一键复制只复制文件名、托盘显示 `[文]`、筛选「文件」无结果）。并新增历史迁移 `migrate_files_from_text`：把已被误判为文本的文件条目重分类为 `file` 并回填完整路径（仅执行一次，无法解析的纯文本保持原样）。
+- **图片一键复制**：`copy_image` 经 arboard `set_image` 把 PNG 写回，可粘贴为图片。
+- **首启引导与常驻**：首次运行在 Rust `setup` 同步打开设置页；非首次仅驻留托盘，macOS 无前台窗口时通过 `ActivationPolicy::Accessory` 隐藏 Dock 图标、有窗口时切回 `Regular`。
+- **托盘历史**：改用与主界面各分类一致的彩色类型图标（`src-tauri/icons/gen_type_icons.py` 生成 `menu-type-*.png`，颜色取自 `src/lib/format.ts` 的 `TYPE_META`）；新增 `get_recent_tray` 排除 `file` 类型；删除废弃的 `i18n::type_prefix` 文案前缀。文字类型图标等比缩小 10%。
+- **侧边栏「全部」分类**：新增专属四宫格图标 `AllIcon`，不再复用文本图标。
+- **数据模型偏差补充（见 9.1 六）**：`content_blob` 对文件类型存 **JSON 路径数组**（而非文件内容）；图片仍为 PNG 二进制。
+- **测试**：Rust `cargo test` 由 24 增至 32（新增文件迁移 / 路径解析 / 托盘排除等单测）。

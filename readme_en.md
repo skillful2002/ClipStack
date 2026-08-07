@@ -16,8 +16,9 @@ ClipStack is a **cross-platform clipboard manager** that lives in your menu bar 
 - **History management**: Reverse-chronological list grouped by day; "pinned" items always stay on top, "favorited" items are independently flagged so important entries never get buried.
 - **Trash**: Deleted items go to the trash where they can be restored or permanently cleared. Both images and trashed items support **preview**.
 - **Search & filter**: Full-text search (focus with `⌘K` / `Ctrl+K`), category switching (All / Text / Link / Code / Image / File), and time filtering (Today / Yesterday / This week / All).
-- **One-click copy**: Click or press Enter to copy an item back to the system clipboard (text / link / code). Copying images and files is disabled for now due to platform API limits.
-- **Menu bar / system tray**: Lives in the macOS menu bar or Windows system tray; dropdown shows recent history for one-click paste. The number of items is configurable in Settings (default 30).
+- **One-click copy**: Click or press Enter to copy an item back to the system clipboard. Text / link / code are written as text; **images** are written back as PNG so they paste as images anywhere; **files** are written back as real file URLs so they paste as the actual files in Finder / File Explorer (only the file paths are stored in the database — file contents are never stored).
+- **Menu bar / system tray**: Lives in the macOS menu bar or Windows system tray; the dropdown shows recent history with a colored type icon matching the sidebar categories for one-click paste. The number of items is configurable in Settings (default 30); file entries are excluded from the tray history.
+- **First-run guide & residency**: On first launch the Settings page opens automatically for initialization; afterwards the app stays resident in the menu bar / tray only (on macOS the Dock icon is hidden when there is no foreground window), and closing the main window hides it instead of quitting.
 - **Global shortcut**: `⌘⇧V` / `Ctrl Shift V` toggles the main window. Closing the main window hides it instead of quitting — the app stays resident in the tray.
 - **Appearance themes**: Light / Dark / Follow system (default is "Follow system", powered by Tauri's native theme API).
 - **Privacy fence (ignored apps)**: Skip specific apps (e.g. password managers) by typing a name or picking from installed apps; matched apps are never captured.
@@ -76,7 +77,21 @@ npm run tauri dev        # run the full Tauri app (frontend + native window)
 
 ---
 
-## 5. Technical Architecture
+## 5. UI Preview
+
+> The screenshots below are actual running screenshots of ClipStack.
+
+**Main interface**: the left sidebar navigates categories (All / Text / Link / Code / Image / File, with counts); the middle pane lists history grouped by day with a toolbar (time filter, clear all); the right pane shows the selected item's details and actions (copy / pin / favorite / delete).
+
+![ClipStack main interface](docs/images/clipstack-main-ui.png)
+
+**Settings interface**: appearance (theme, language), storage (history limit, tray history count), launch at login, and ignored apps.
+
+![ClipStack settings interface](docs/images/clipstack-settings-ui.png)
+
+---
+
+## 6. Technical Architecture
 
 | Layer | Choice | Notes |
 |---|---|---|
@@ -109,7 +124,7 @@ clipboards/
 
 ---
 
-## 6. Data Model (SQLite)
+## 7. Data Model (SQLite)
 
 The local database contains four tables: `history`, `trash`, `settings`, and `ignored_apps`.
 
@@ -120,11 +135,11 @@ The local database contains four tables: `history`, `trash`, `settings`, and `ig
 | settings | key / value | Appearance, capacity, autostart, etc. |
 | ignored_apps | name | Skip capture by app name (case-insensitive) |
 
-All data is stored locally with no cloud sync by default — your clipboard stays private.
+Storage of `content_blob`: images store the PNG bytes; **files store a JSON array of paths** (not the file contents), and `content_text` additionally holds the full paths joined by `, ` for list display. All data is stored locally with no cloud sync by default — your clipboard stays private.
 
 ---
 
-## 7. For Developers
+## 8. For Developers
 
 For the full developer reference — environment setup, build commands, coding conventions, data model, and packaging/signing flow — see the in-repo docs:
 
@@ -133,18 +148,17 @@ For the full developer reference — environment setup, build commands, coding c
 - [`docs/clipstack-build-steps.md`](docs/clipstack-build-steps.md) — Step-by-step build log & progress
 - [`docs/clipstack-packaging.md`](docs/clipstack-packaging.md) — Local build, macOS signing + notarization, Windows `.msi`, CI
 
-Quality gates: Rust `cargo test` (24/24), `cargo clippy --all-targets` (0 warnings); frontend `npm run build` (tsc + vite) passes.
+Quality gates: Rust `cargo test` (32/32), `cargo clippy --all-targets` (0 warnings); frontend `npm run build` (tsc + vite) passes.
 
 ---
 
-## 8. Known Limitations
+## 9. Known Limitations
 
-- One-click copy for images / files is not yet implemented (buttons disabled) due to platform API limits; planned for a future release.
 - Actual signing, notarization, and packaging must be performed on a developer machine or CI; the sandbox cannot run them.
-- The macOS menu bar tray icon renders as a template image by default (may appear monochrome) — this is native behavior.
+- The macOS menu bar tray icon renders as a template image by default (may appear monochrome) — this is native behavior. The tray menu item icons are colored (generated by `src-tauri/icons/gen_type_icons.py`).
 
 ---
 
-## 9. License
+## 10. License
 
 See the repository license file.

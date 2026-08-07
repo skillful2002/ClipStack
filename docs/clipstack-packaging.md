@@ -62,7 +62,7 @@ npm run tauri build
 ## 六、已知约束
 
 - **沙箱无法执行签名 / 公证 / 真实 `tauri build` 出包**：本阶段代码配置已就绪，最终出包与 Gatekeeper/WebView2 验证需在你本机或 CI 完成。
-- 图片 / 文件的一键复制因平台 API 限制暂未实现（前端对这两类已禁用复制按钮），后续可接入。
+- 图片 / 文件的一键复制已通过 arboard 实现（图片写回 PNG、文件写回真实文件 URL，库内仅存文件路径），但正式出包与跨机粘贴验证仍需在真实系统上完成。
 
 ## 七、应用图标与托盘图标
 
@@ -77,3 +77,7 @@ npm run tauri build
    - 仅重新生成 PNG（如跑 `tauri icon`）后，增量 dev/build **仍会用旧的嵌入图标**；
    - 修复方法：改完 PNG 后执行 `touch src-tauri/tauri.conf.json`，再**彻底退出** dev 进程重新 `npm run tauri dev`（或 `cargo clean` 后重建），托盘/窗口图标才会更新。
 3. **macOS 菜单栏托盘图标渲染**：菜单栏托盘图标默认按「模板图」渲染（忽略彩色、用系统色反色）。彩色图标用作托盘时可能偏单色/发灰，属原生行为；若需更原生观感，可单独提供单色描边版并设为模板图。
+
+### 托盘菜单项图标（彩色）
+- 托盘下拉历史每条前的**类型图标**为彩色 PNG，由 `src-tauri/icons/gen_type_icons.py` 生成 `menu-type-{text,link,code,image}.png`，颜色取自前端 `src/lib/format.ts` 的 `TYPE_META`（文本 #059669 / 链接 #2563eb / 代码 #7c3aed / 图片 #ea580c），编译期内嵌。
+- 该图标仅用于「菜单项」（`IconMenuItem`），不影响应用 / Dock 图标（仍按模板图渲染，见上）。改完 PNG 后同样需 `touch src-tauri/tauri.conf.json` 并重启 dev/build 才会更新（见第七节第 2 点）。
