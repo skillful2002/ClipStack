@@ -28,10 +28,14 @@ pub fn build_tray(
     db: &DbState,
     monitor: &Arc<Mutex<MonitorState>>,
 ) -> Result<TrayIcon, Box<dyn std::error::Error>> {
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .expect("window icon must exist");
+    // 托盘图标：macOS 使用单色模板图标以自动适配明暗菜单栏；
+    // Windows / Linux 使用彩色图标。
+    #[cfg(target_os = "macos")]
+    let icon = Image::from_bytes(include_bytes!("../icons/tray-icon-template.png"))
+        .expect("failed to load tray icon template");
+    #[cfg(not(target_os = "macos"))]
+    let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+        .expect("failed to load tray icon");
     let menu = build_menu(app, db)?;
     let db_for_event = db.clone();
     let monitor_for_event = monitor.clone();
@@ -44,6 +48,11 @@ pub fn build_tray(
             handle_menu_event(app, event, &db_for_event, &monitor_for_event)
         })
         .build(app)?;
+
+    // macOS 菜单栏图标标记为模板，系统会根据菜单栏深浅主题自动反色。
+    #[cfg(target_os = "macos")]
+    tray.set_icon_as_template(true)?;
+
     Ok(tray)
 }
 
