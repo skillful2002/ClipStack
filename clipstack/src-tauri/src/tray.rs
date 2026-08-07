@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::i18n::{type_prefix, tray_about, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::set_dock_visible;
 
 /// 托盘菜单展示历史记录条数的设置键与缺省值。
 const TRAY_HISTORY_KEY: &str = "tray_history_count";
@@ -108,6 +109,8 @@ fn build_menu(
             .icon(about_icon)
             .build(app)?,
     )?;
+    // 「关于系统」与「退出」之间以横线分隔，与上方「打开主界面 / 设置」分组呼应。
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&PredefinedMenuItem::quit(app, Some(tray_quit(lang)))?)?;
     Ok(menu)
 }
@@ -142,6 +145,8 @@ fn handle_menu_event(
                 let _ = w.show();
                 let _ = w.set_focus();
             }
+            // 窗口打开时恢复 Dock 图标（仅 macOS）。
+            set_dock_visible(app);
             let _ = app.emit("show-view", "all");
         }
         "settings" => {
@@ -149,6 +154,7 @@ fn handle_menu_event(
                 let _ = w.show();
                 let _ = w.set_focus();
             }
+            set_dock_visible(app);
             let _ = app.emit("show-view", "settings");
         }
         "about" => {
@@ -156,6 +162,7 @@ fn handle_menu_event(
                 let _ = w.show();
                 let _ = w.set_focus();
             }
+            set_dock_visible(app);
             let _ = app.emit("show-view", "about");
         }
         _ => {}

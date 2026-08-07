@@ -12,11 +12,32 @@ mod tray;
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{Listener, Manager};
+use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use clipboard::MonitorState;
 use db::{AppDb, DbState};
+
+/// macOS：以「配件（Accessory）」模式运行 —— 不在 Dock 显示图标、不成为前台应用（仅托盘常驻）。
+/// 窗口关闭收进托盘时使用，满足「未打开界面时不显示 Dock 图标」。
+#[cfg(target_os = "macos")]
+pub fn set_dock_hidden(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+/// macOS：恢复「常规（Regular）」模式 —— 在 Dock 显示图标并成为前台应用。窗口打开时使用。
+#[cfg(target_os = "macos")]
+pub fn set_dock_visible(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+}
+
+/// 非 macOS 平台无 Dock 概念，提供同名 no-op 以便调用处无需每处写 cfg 判断。
+#[cfg(not(target_os = "macos"))]
+pub fn set_dock_hidden(_app: &AppHandle) {}
+
+/// 非 macOS 平台无 Dock 概念，提供同名 no-op。
+#[cfg(not(target_os = "macos"))]
+pub fn set_dock_visible(_app: &AppHandle) {}
 
 pub fn run() {
     let monitor_state: Arc<Mutex<MonitorState>> = Arc::new(Mutex::new(MonitorState::default()));
@@ -117,10 +138,13 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 let win = w.clone();
                 let win_for_event = win.clone();
+                let app_for_event = app.handle().clone();
                 win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = win_for_event.hide();
+                        // 窗口收起后隐藏 Dock 图标（仅 macOS）：未打开界面时不在程序坞显示图标。
+                        set_dock_hidden(&app_for_event);
                     }
                 });
             }
@@ -148,6 +172,7 @@ pub fn run() {
             commands::get_item_blob,
             commands::get_trash_blob,
             commands::get_system_info,
+            commands::setup_first_launch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipStack");

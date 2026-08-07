@@ -33,8 +33,11 @@ impl AppDb {
 }
 
 /// 解析应用数据目录并打开（不存在则创建）clipstack.db，执行迁移。
+/// 数据统一存放于用户主目录下的 `.clipstack` 文件夹（跨 macOS / Windows / Linux 一致），
+/// 不再依赖各平台的应用数据目录（如 macOS 的 ~/Library/Application Support/<identifier>）。
 pub fn open(app: &AppHandle) -> Result<AppDb, Box<dyn std::error::Error>> {
-    let dir = app.path().app_data_dir()?;
+    let home = app.path().home_dir()?;
+    let dir = home.join(".clipstack");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("clipstack.db");
     let conn = Connection::open(&path)?;

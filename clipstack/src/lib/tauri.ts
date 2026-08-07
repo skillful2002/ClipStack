@@ -108,3 +108,7 @@ export interface SystemInfo {
 /** 关于系统：返回平台与架构信息。 */
 export const getSystemInfo = (): Promise<SystemInfo> =>
   invoke<SystemInfo>("get_system_info");
+
+/** 首次运行处理：窗口默认隐藏，仅首次运行才显示；返回是否为首次运行。 */
+export const setupFirstLaunch = (): Promise<boolean> =>
+  invoke<boolean>("setup_first_launch");

@@ -8,6 +8,7 @@ import {
   onShowView,
   onTrayCopied,
   getSettings,
+  setupFirstLaunch,
 } from "./lib/tauri";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
 import { useI18nStore, getResolvedLang, translate, type Language } from "./lib/i18n";
@@ -52,6 +53,14 @@ export default function App() {
         themeUnlistenRef.current = await watchSystemTheme();
       } catch {
         /* 不支持时静默 */
+      }
+      // 首启处理：窗口默认隐藏（仅托盘常驻），首次运行才显示窗口；
+      // 首次运行直接打开设置页面，引导用户配置；非首次保持仅托盘。
+      try {
+        const isFirst = await setupFirstLaunch();
+        if (isFirst) setView("settings");
+      } catch {
+        /* 失败时退化为仅托盘，不阻塞启动 */
       }
     })();
     const unlisten = onClipboardChanged((item) => prepend(item));

@@ -5,11 +5,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState, DEFAULT_LIMIT};
 use crate::models::{ContentType, HistoryItem, NewItem, Setting};
+use crate::{set_dock_hidden, set_dock_visible};
 
 /// 新增条目（手动添加 / 前端回写场景）。返回新行 id。
 #[tauri::command]
@@ -220,4 +221,30 @@ pub fn get_system_info() -> SystemInfo {
     }
     .to_string();
     SystemInfo { platform, arch }
+}
+
+/// 首次运行处理：窗口默认隐藏（仅托盘常驻），仅首次运行才显示窗口。
+/// 返回 `true` 表示这是首次运行（已显示窗口 + 标记已启动），`false` 表示非首次（窗口保持隐藏）。
+/// 使用 `settings` 表中的 `first_launch_done` 标记持久化，确保「首次」判定跨重启稳定。
+#[tauri::command]
+pub fn setup_first_launch(app: AppHandle, db: State<'_, DbState>) -> Result<bool, String> {
+    let is_first = {
+        let conn = db.lock();
+        db::get_string_setting(&conn, "first_launch_done", "0") != "1"
+    };
+    if is_first {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        // 首次运行窗口可见，恢复 Dock 图标（仅 macOS）。
+        set_dock_visible(&app);
+        let conn = db.lock();
+        db::update_setting(&conn, "first_launch_done", "1").map_err(|e| e.to_string())?;
+        Ok(true)
+    } else {
+        // 非首次运行：窗口保持隐藏（仅托盘），隐藏 Dock 图标（仅 macOS）。
+        set_dock_hidden(&app);
+        Ok(false)
+    }
 }
