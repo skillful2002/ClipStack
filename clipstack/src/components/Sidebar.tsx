@@ -11,6 +11,7 @@ import {
   SettingsIcon,
   TrashBinIcon,
   AboutIcon,
+  AllIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -66,7 +67,7 @@ export function Sidebar() {
             }}
           >
             <span className="nav-icon" style={{ color: cat.type ? TYPE_META[cat.type].color : "var(--cs-text-secondary)" }}>
-              {cat.type ? <TypeIcon type={cat.type} size={16} /> : <TypeIcon type="text" size={16} />}
+              {cat.type ? <TypeIcon type={cat.type} size={16} /> : <AllIcon size={16} />}
             </span>
             <span className="nav-label">{categoryLabel(cat)}</span>
             <span className="nav-count">{counts[cat.key] ?? 0}</span>
