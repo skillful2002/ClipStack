@@ -109,6 +109,6 @@ export interface SystemInfo {
 export const getSystemInfo = (): Promise<SystemInfo> =>
   invoke<SystemInfo>("get_system_info");
 
-/** 首次运行处理：窗口默认隐藏，仅首次运行才显示；返回是否为首次运行。 */
-export const setupFirstLaunch = (): Promise<boolean> =>
-  invoke<boolean>("setup_first_launch");
+/** 首次运行判定：窗口显示与标记写入已在启动阶段同步完成；此处仅读取标志，供前端决定是否进入设置页。 */
+export const wasFirstRun = (): Promise<boolean> =>
+  invoke<boolean>("was_first_run");

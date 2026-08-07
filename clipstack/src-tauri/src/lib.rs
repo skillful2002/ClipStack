@@ -10,7 +10,10 @@ mod i18n;
 mod models;
 mod tray;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -54,6 +57,30 @@ pub fn run() {
             let app_db: AppDb = db::open(app.handle())?;
             let db_state: DbState = Arc::new(app_db);
             app.manage(db_state.clone());
+
+            // 首次运行判定与窗口显隐：在 setup 阶段同步完成，确保窗口在事件循环启动前就已显示，
+            // 避免原先「前端异步加载后再 show」带来的时机过晚与 macOS 激活策略抖动（窗口失焦沉底）。
+            // first_run_flag 供前端读取以决定是否自动进入设置页。
+            let first_run_flag = Arc::new(AtomicBool::new(false));
+            app.manage(first_run_flag.clone());
+            let is_first = {
+                let conn = db_state.conn.lock().expect("db lock poisoned");
+                db::get_string_setting(&conn, "first_launch_done", "0") != "1"
+            };
+            if is_first {
+                // 首次运行：恢复常规模式（Dock 可见）并显示主窗口，引导用户完成初始配置。
+                set_dock_visible(app.handle());
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+                let conn = db_state.conn.lock().expect("db lock poisoned");
+                let _ = db::update_setting(&conn, "first_launch_done", "1");
+                first_run_flag.store(true, Ordering::SeqCst);
+            } else {
+                // 非首次运行：仅托盘常驻，隐藏 Dock 图标，窗口保持隐藏。
+                set_dock_hidden(app.handle());
+            }
 
             // 托盘菜单语言状态（前端通过 language-changed 事件推送已解析语言）。
             app.manage(i18n::MenuLang::default());
@@ -172,7 +199,7 @@ pub fn run() {
             commands::get_item_blob,
             commands::get_trash_blob,
             commands::get_system_info,
-            commands::setup_first_launch,
+            commands::was_first_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipStack");

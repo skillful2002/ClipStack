@@ -8,7 +8,7 @@ import {
   onShowView,
   onTrayCopied,
   getSettings,
-  setupFirstLaunch,
+  wasFirstRun,
 } from "./lib/tauri";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
 import { useI18nStore, getResolvedLang, translate, type Language } from "./lib/i18n";
@@ -54,13 +54,13 @@ export default function App() {
       } catch {
         /* 不支持时静默 */
       }
-      // 首启处理：窗口默认隐藏（仅托盘常驻），首次运行才显示窗口；
-      // 首次运行直接打开设置页面，引导用户配置；非首次保持仅托盘。
+      // 首启处理：窗口的显示/隐藏与首启标记写入已在 Rust setup 阶段同步完成；
+      // 此处仅读取标志，首次运行时自动进入设置页引导配置。
       try {
-        const isFirst = await setupFirstLaunch();
+        const isFirst = await wasFirstRun();
         if (isFirst) setView("settings");
       } catch {
-        /* 失败时退化为仅托盘，不阻塞启动 */
+        /* 读取失败时静默，不影响启动 */
       }
     })();
     const unlisten = onClipboardChanged((item) => prepend(item));
