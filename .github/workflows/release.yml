@@ -43,7 +43,9 @@ jobs:
       - name: Build and bundle (macOS)
         working-directory: clipstack
         env:
-          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          # 未配置 Secrets 时回退为 ad-hoc 签名（"-"），保证 CI 在无证书时也能产出可本地测试的 .dmg；
+          # 配置了 Developer ID 证书与应用专用密码后，自动走正式签名 + 公证。
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY || '-' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

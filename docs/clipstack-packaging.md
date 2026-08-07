@@ -49,10 +49,12 @@ npm run tauri build
 
 见 `.github/workflows/release.yml`：
 
-- 推送 `v*` 标签或手动触发。
-- `build-macos`：macOS runner，读取上述 4 个 Secrets 完成签名 + 公证，上传 `.dmg`。
-- `build-windows`：Windows runner，产出 `.msi`。
-- 产物以 GitHub Artifacts 形式留存；如需自动建 Release，可在 `tauri build` 后接 `softprops/action-gh-release`。
+- 推送 `v*` 标签或手动触发（`Actions` 页 → `Release` → `Run workflow`）。
+- `build-macos`：macOS runner。
+  - 仓库**未配置** `APPLE_SIGN_IDENTITY` 等 Secrets 时，自动回退为 **ad-hoc 签名（`-`）**，仍能产出可本地测试的 `.dmg`；
+  - 配置了 `APPLE_SIGN_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD`（App 专用密码）/ `APPLE_TEAM_ID` 后，自动走 **Developer ID 签名 + 公证**，产出可分发的 `.dmg`。
+- `build-windows`：Windows runner，产出 `.msi`（WebV开启 downloadBootstrapper 引导）。
+- 两个 job 的产物（`.dmg` / `.msi`）以 **GitHub Artifacts** 形式留存，构建完成后在 `Actions` → 对应 run → `Artifacts` 处下载；如需自动建 Release，可在 `tauri build` 后接 `softprops/action-gh-release`。
 
 ## 五、体积 / 资源基线（验收参考）
 
@@ -61,8 +63,10 @@ npm run tauri build
 
 ## 六、已知约束
 
-- **沙箱无法执行签名 / 公证 / 真实 `tauri build` 出包**：本阶段代码配置已就绪，最终出包与 Gatekeeper/WebView2 验证需在你本机或 CI 完成。
-- 图片 / 文件的一键复制已通过 arboard 实现（图片写回 PNG、文件写回真实文件 URL，库内仅存文件路径），但正式出包与跨机粘贴验证仍需在真实系统上完成。
+- **签名 / 公证需要你的开发者证书**：本仓库在沙箱/CI 中**可以正常执行 `tauri build` 出包**（依赖已缓存、crates.io 可达），但本机钥匙串无 Developer ID 证书，因此本地与「无 Secret 的 CI」产物为 **ad-hoc 签名（未公证）**——自己机器可运行，分发给他人时 macOS 会报「无法验证开发者」、Windows SmartScreen 会拦截。正式分发务必在自有 Mac 配齐 4 个 `APPLE_*` Secrets 后由 CI 签名 + 公证，或对 Windows `.msi` 用 signtool 签名。
+- **Windows 无法在 macOS 交叉编译**：Tauri 不支持从 macOS 产出 Windows 安装包，`.msi` 必须由 Windows 机器或 `build-windows` CI job 构建。
+- **bundle identifier 以 `.app` 结尾**：`tauri.conf.json` 中 `identifier: tech.newxin-clipstack.app` 会被 Tauri 警告「与 macOS 应用包扩展冲突」，但不影响构建；如需消除警告，可改为 `tech.newxin.clipstack`（属此前设定，改动需同步考虑已发布版本）。
+- 图片 / 文件的一键复制已通过 arboard 实现（图片写回 PNG、文件写回真实文件 URL，库内仅存文件路径），跨机粘贴验证仍需在真实系统上完成。
 
 ## 七、应用图标与托盘图标
 
