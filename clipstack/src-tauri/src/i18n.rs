@@ -86,6 +86,18 @@ pub fn tray_about(lang: Lang) -> &'static str {
     }
 }
 
+/// 托盘菜单「帮助」标签。
+pub fn tray_help(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "帮助",
+        Lang::ZhTw => "說明",
+        Lang::En => "Help",
+        Lang::Ja => "ヘルプ",
+        Lang::De => "Hilfe",
+        Lang::Fr => "Aide",
+    }
+}
+
 /// 托盘菜单「退出」标签（PredefinedMenuItem::quit 的自定义文案）。
 pub fn tray_quit(lang: Lang) -> &'static str {
     match lang {

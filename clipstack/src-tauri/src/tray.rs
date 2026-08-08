@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
-use crate::i18n::{tray_about, tray_empty, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::i18n::{tray_about, tray_empty, tray_help, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
 use crate::models::ContentType;
 use crate::set_dock_visible;
 
@@ -103,6 +103,7 @@ fn build_menu(
     let open_icon = Image::from_bytes(include_bytes!("../icons/menu-open.png"))?;
     let settings_icon = Image::from_bytes(include_bytes!("../icons/menu-settings.png"))?;
     let about_icon = Image::from_bytes(include_bytes!("../icons/menu-about.png"))?;
+    let help_icon = Image::from_bytes(include_bytes!("../icons/menu-help.png"))?;
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(
@@ -119,6 +120,13 @@ fn build_menu(
     )?;
     // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
     menu.append(&PredefinedMenuItem::separator(app)?)?;
+    // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(
+        &IconMenuItemBuilder::with_id("help", tray_help(lang))
+            .icon(help_icon)
+            .build(app)?,
+    )?;
     menu.append(
         &IconMenuItemBuilder::with_id("about", tray_about(lang))
             .icon(about_icon)
@@ -216,6 +224,14 @@ fn handle_menu_event(
             }
             set_dock_visible(app);
             let _ = app.emit("show-view", "settings");
+        }
+        "help" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            set_dock_visible(app);
+            let _ = app.emit("show-view", "help");
         }
         "about" => {
             if let Some(w) = app.get_webview_window("main") {

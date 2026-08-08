@@ -12,6 +12,7 @@ import {
   SettingsIcon,
   TrashBinIcon,
   AboutIcon,
+  HelpIcon,
   AllIcon,
 } from "./icons";
 
@@ -98,6 +99,15 @@ export function Sidebar() {
           </span>
           <span className="nav-label">{t("sidebar.trash")}</span>
           <span className="nav-shortcut">{NAV_SHORTCUTS.trash}</span>
+        </button>
+        <button
+          className={`nav-item${view === "help" ? " active" : ""}`}
+          onClick={() => setView("help")}
+        >
+          <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+            <HelpIcon size={16} />
+          </span>
+          <span className="nav-label">{t("sidebar.help")}</span>
         </button>
         <button
           className={`nav-item${view === "about" ? " active" : ""}`}

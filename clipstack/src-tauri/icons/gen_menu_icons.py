@@ -68,6 +68,25 @@ def draw_info():
     return img
 
 
+def draw_help():
+    """帮助（问号圆圈）：使用与设置齿轮、关于系统相同的灰度色系，
+    确保在托盘菜单的浅色 / 深色背景下均清晰可见。
+    """
+    img = new_canvas()
+    d = ImageDraw.Draw(img)
+    cx, cy = SS / 2, SS / 2
+    r = 22
+    # 外圈圆环
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=GRAY, width=5)
+    # 问号上半弧（10 点到 2 点，经过 12 点）
+    d.arc([cx - 11, cy - 14, cx + 11, cy + 8], start=240, end=300, fill=GRAY, width=5)
+    # 问号竖线
+    d.line([cx, cy - 2, cx, cy + 6], fill=GRAY, width=5)
+    # 问号点
+    d.ellipse([cx - 3, cy + 11, cx + 3, cy + 17], fill=GRAY)
+    return img
+
+
 def save(img, name):
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
     out = f"{name}.png"
@@ -79,3 +98,4 @@ if __name__ == "__main__":
     save(draw_window(), "menu-open")
     save(draw_gear(), "menu-settings")
     save(draw_info(), "menu-about")
+    save(draw_help(), "menu-help")

@@ -12,7 +12,7 @@ export type Category = ContentType | "all";
 /** 主列表时间筛选。 */
 export type TimeFilter = "all" | "today" | "yesterday" | "week";
 /** 主区域视图。 */
-export type View = "main" | "settings" | "trash" | "about";
+export type View = "main" | "settings" | "trash" | "about" | "help";
 
 interface HistoryState {
   items: HistoryItem[];

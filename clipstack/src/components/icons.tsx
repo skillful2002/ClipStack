@@ -159,3 +159,14 @@ export function AboutIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/** 帮助（问号圆圈）。 */
+export function HelpIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7" />
+      <path d="M12 16.5h.01" />
+    </svg>
+  );
+}

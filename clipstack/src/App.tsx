@@ -20,6 +20,7 @@ import { SettingsView } from "./components/SettingsView";
 import { TrashView } from "./components/TrashView";
 import { TrashDetail } from "./components/TrashDetail";
 import { AboutView } from "./components/AboutView";
+import { HelpView } from "./components/HelpView";
 import "./styles/app.css";
 
 export default function App() {
@@ -75,7 +76,9 @@ export default function App() {
   // P4：托盘菜单 / 全局快捷键触发的视图切换与复制回执。
   useEffect(() => {
     const p1 = onShowView((v) =>
-      setView(v === "settings" ? "settings" : v === "about" ? "about" : "main"),
+      setView(
+        v === "settings" ? "settings" : v === "about" ? "about" : v === "help" ? "help" : "main",
+      ),
     );
     const p2 = onTrayCopied((id) => {
       select(id);
@@ -193,6 +196,7 @@ export default function App() {
         )}
         {view === "settings" && <SettingsView />}
         {view === "about" && <AboutView />}
+        {view === "help" && <HelpView />}
         {view === "trash" && (
           <>
             <TrashView />

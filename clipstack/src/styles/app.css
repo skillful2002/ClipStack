@@ -748,6 +748,84 @@
   border-color: var(--cs-accent, var(--cs-border));
 }
 
+/* 帮助视图 */
+.help-intro {
+  margin-bottom: 18px;
+  line-height: 1.6;
+}
+
+.help-section {
+  padding: 12px 0;
+  border-top: 1px solid var(--cs-border);
+}
+
+.help-h {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--cs-text-primary);
+}
+
+.help-content {
+  color: var(--cs-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.help-p {
+  margin: 0 0 8px;
+}
+
+.help-ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.help-ul li {
+  margin-bottom: 4px;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.help-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--cs-border);
+  font-size: 13px;
+}
+
+.help-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--cs-text-primary);
+}
+
+.help-link {
+  color: var(--cs-accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.help-link:hover {
+  opacity: 0.85;
+}
+
+.help-content kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--cs-text-primary);
+  background: var(--cs-bg-subtle);
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  margin: 0 1px;
+}
+
 .settings-add {
   display: flex;
   gap: 8px;
