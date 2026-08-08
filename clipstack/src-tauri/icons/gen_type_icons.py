@@ -72,22 +72,25 @@ def draw_image():
     return img
 
 
-def draw_capsule(angle_deg, color):
-    """单个圆角胶囊（链节），旋转 angle 度，作为链条的一半。"""
+def draw_capsule(angle_deg, color, cx_view, cy_view, w_view, h_view):
+    """单个圆角胶囊（链节），中心位于 (cx_view, cy_view)，旋转 angle_deg 度。"""
     tmp = new_canvas()
     d = ImageDraw.Draw(tmp)
-    w, h = 14 * F * SCALE, 40 * F * SCALE
-    x0, y0 = (SS - w) / 2, (SS - h) / 2
+    w, h = w_view * F * SCALE, h_view * F * SCALE
+    cx, cy = p(cx_view, cy_view)
+    x0, y0 = cx - w / 2, cy - h / 2
     d.rounded_rectangle([x0, y0, x0 + w, y0 + h], radius=w / 2, outline=color, width=W)
     return tmp.rotate(angle_deg, resample=Image.BICUBIC, center=(SS / 2, SS / 2))
 
 
 def draw_link():
-    """两条交叉胶囊构成链条（对应 TypeIcon link 的链节意象）。"""
+    """两个互锁的圆角胶囊链节，与前端 TypeIcon link 的字形一致。"""
     base = new_canvas()
-    for angle in (45, -45):
-        cap = draw_capsule(angle, COLORS["link"])
-        base = Image.alpha_composite(base, cap)
+    # 上环（右上→左下）与下环（左下→右上）互锁，尺寸/角度与 TypeIcon link 路径对应。
+    cap1 = draw_capsule(45, COLORS["link"], 15, 9, 10, 13)
+    base = Image.alpha_composite(base, cap1)
+    cap2 = draw_capsule(-45, COLORS["link"], 9, 15, 10, 13)
+    base = Image.alpha_composite(base, cap2)
     return base
 
 
