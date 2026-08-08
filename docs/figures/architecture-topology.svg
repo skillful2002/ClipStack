@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 280" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <rect width="680" height="280" fill="#ffffff"/>
+  <!-- Relay -->
+  <rect x="245" y="95" width="190" height="90" rx="10" fill="#1e3a5f" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="340" y="126" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">同步中继 Relay</text>
+  <text x="340" y="148" text-anchor="middle" fill="#cfe3ff" font-size="12">Rust/axum + WebSocket</text>
+  <text x="340" y="166" text-anchor="middle" fill="#cfe3ff" font-size="12">无状态 · 仅转发密文</text>
+  <!-- macOS client -->
+  <rect x="20" y="100" width="160" height="80" rx="10" fill="#f0f4f8" stroke="#334155" stroke-width="2"/>
+  <text x="100" y="128" text-anchor="middle" fill="#1a202c" font-size="14" font-weight="600">macOS 客户端</text>
+  <text x="100" y="148" text-anchor="middle" fill="#475569" font-size="11">本地 SQLite + X25519 设备密钥</text>
+  <text x="100" y="166" text-anchor="middle" fill="#475569" font-size="11">（E2E 加解密在端侧）</text>
+  <!-- Windows client -->
+  <rect x="500" y="100" width="160" height="80" rx="10" fill="#f0f4f8" stroke="#334155" stroke-width="2"/>
+  <text x="580" y="128" text-anchor="middle" fill="#1a202c" font-size="14" font-weight="600">Windows 客户端</text>
+  <text x="580" y="148" text-anchor="middle" fill="#475569" font-size="11">本地 SQLite + X25519 设备密钥</text>
+  <text x="580" y="166" text-anchor="middle" fill="#475569" font-size="11">（E2E 加解密在端侧）</text>
+  <!-- connections A <-> R -->
+  <line x1="180" y1="140" x2="245" y2="140" stroke="#2b6cb0" stroke-width="2.5"/>
+  <polygon points="245,140 233,134 233,146" fill="#2b6cb0"/>
+  <polygon points="180,140 192,134 192,146" fill="#2b6cb0"/>
+  <text x="212" y="131" text-anchor="middle" fill="#1a4971" font-size="10">TLS WS 推送/转发</text>
+  <!-- connections B <-> R -->
+  <line x1="435" y1="140" x2="500" y2="140" stroke="#2b6cb0" stroke-width="2.5"/>
+  <polygon points="500,140 488,134 488,146" fill="#2b6cb0"/>
+  <polygon points="435,140 447,134 447,146" fill="#2b6cb0"/>
+  <!-- LAN dashed -->
+  <path d="M100,180 C100,230 580,230 580,180" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4" fill="none"/>
+  <text x="340" y="248" text-anchor="middle" fill="#64748b" font-size="11">同局域网可选直连 (mDNS)</text>
+</svg>

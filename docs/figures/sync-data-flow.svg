@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 290" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <rect width="560" height="290" fill="#ffffff"/>
+  <g font-size="11" text-anchor="middle">
+    <rect x="20" y="30" width="90" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <text x="65" y="55" fill="#312e81" font-weight="600">本地捕获</text>
+    <text x="65" y="72" fill="#4338ca">剪贴板</text>
+    <rect x="120" y="30" width="90" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <text x="165" y="55" fill="#312e81" font-weight="600">设备侧</text>
+    <text x="165" y="72" fill="#4338ca">加密 E2E</text>
+    <rect x="220" y="30" width="90" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <text x="265" y="55" fill="#312e81" font-weight="600">TLS 推送</text>
+    <text x="265" y="72" fill="#4338ca">至中继</text>
+    <rect x="320" y="30" width="90" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <text x="365" y="55" fill="#312e81" font-weight="600">中继转发</text>
+    <text x="365" y="72" fill="#4338ca">配对设备</text>
+    <rect x="420" y="30" width="90" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+    <text x="465" y="55" fill="#312e81" font-weight="600">解密 + 去重</text>
+    <text x="465" y="72" fill="#4338ca">sync_id/hash</text>
+    <g stroke="#4f46e5" stroke-width="2" fill="#4f46e5">
+      <line x1="110" y1="60" x2="118" y2="60"/><polygon points="118,60 110,56 110,64"/>
+      <line x1="210" y1="60" x2="218" y2="60"/><polygon points="218,60 210,56 210,64"/>
+      <line x1="310" y1="60" x2="318" y2="60"/><polygon points="318,60 310,56 310,64"/>
+      <line x1="410" y1="60" x2="418" y2="60"/><polygon points="418,60 410,56 410,64"/>
+    </g>
+    <rect x="420" y="130" width="90" height="55" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+    <text x="465" y="152" fill="#065f46" font-weight="600">写入本地</text>
+    <text x="465" y="170" fill="#047857">SQLite</text>
+    <line x1="465" y1="90" x2="465" y2="128" stroke="#059669" stroke-width="2"/><polygon points="465,128 460,118 470,118" fill="#059669"/>
+    <rect x="420" y="220" width="90" height="55" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="465" y="242" fill="#92400e" font-weight="600">可选:写回</text>
+    <text x="465" y="260" fill="#b45309">系统剪贴板</text>
+    <line x1="465" y1="185" x2="465" y2="218" stroke="#d97706" stroke-width="2" stroke-dasharray="5 3"/><polygon points="465,218 460,208 470,208" fill="#d97706"/>
+    <text x="305" y="118" fill="#047857" font-size="10">解密后入库</text>
+    <text x="305" y="208" fill="#b45309" font-size="10">自动粘贴开关控制</text>
+  </g>
+</svg>

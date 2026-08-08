@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 300" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <rect width="680" height="300" fill="#ffffff"/>
+  <rect x="270" y="120" width="140" height="80" rx="10" fill="#1e3a5f" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="340" y="150" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">中继 Relay</text>
+  <text x="340" y="170" text-anchor="middle" fill="#cfe3ff" font-size="11">按 group_id 路由</text>
+  <rect x="30" y="40" width="190" height="70" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="125" y="68" text-anchor="middle" fill="#065f46" font-size="13" font-weight="600">家庭配对 · 激活中</text>
+  <text x="125" y="88" text-anchor="middle" fill="#047857" font-size="11">relay.home · 实时连接</text>
+  <circle cx="48" cy="55" r="5" fill="#10b981"/>
+  <rect x="30" y="140" width="190" height="70" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="125" y="168" text-anchor="middle" fill="#475569" font-size="13" font-weight="600">公司配对 · 休眠</text>
+  <text x="125" y="188" text-anchor="middle" fill="#64748b" font-size="11">relay.work · 未连接</text>
+  <circle cx="48" cy="155" r="5" fill="#94a3b8"/>
+  <rect x="30" y="240" width="190" height="70" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="125" y="268" text-anchor="middle" fill="#475569" font-size="13" font-weight="600">朋友配对 · 休眠</text>
+  <text x="125" y="288" text-anchor="middle" fill="#64748b" font-size="11">relay.friend · 未连接</text>
+  <circle cx="48" cy="255" r="5" fill="#94a3b8"/>
+  <line x1="220" y1="75" x2="270" y2="150" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="270,150 260,146 264,138" fill="#059669"/>
+  <text x="242" y="105" fill="#047857" font-size="11">激活:实时收发</text>
+  <line x1="220" y1="175" x2="270" y2="160" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+  <line x1="220" y1="275" x2="270" y2="165" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="245" y="235" fill="#64748b" font-size="11">休眠:仅保存参数</text>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <rect width="680" height="320" fill="#ffffff"/>
+  <rect x="30" y="40" width="330" height="240" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="50" y="65" fill="#334155" font-size="13" font-weight="700">同步组（同一 group_id）</text>
+  <rect x="60" y="90" width="120" height="60" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="120" y="115" text-anchor="middle" fill="#065f46" font-size="12" font-weight="600">客户端 A</text>
+  <text x="120" y="133" text-anchor="middle" fill="#047857" font-size="10">共享:开（发+收）</text>
+  <rect x="60" y="180" width="120" height="60" rx="8" fill="#fff7ed" stroke="#d97706" stroke-width="2"/>
+  <text x="120" y="205" text-anchor="middle" fill="#92400e" font-size="12" font-weight="600">客户端 B</text>
+  <text x="120" y="223" text-anchor="middle" fill="#b45309" font-size="10">共享:关（仅收）</text>
+  <rect x="200" y="135" width="120" height="60" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="260" y="160" text-anchor="middle" fill="#065f46" font-size="12" font-weight="600">客户端 C</text>
+  <text x="260" y="178" text-anchor="middle" fill="#047857" font-size="10">共享:开（发+收）</text>
+  <rect x="470" y="130" width="150" height="70" rx="10" fill="#1e3a5f" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="545" y="160" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">中转 Relay</text>
+  <text x="545" y="180" text-anchor="middle" fill="#cfe3ff" font-size="11">全组转发</text>
+  <g stroke="#059669" stroke-width="2" fill="#059669">
+    <line x1="180" y1="120" x2="465" y2="155"/><polygon points="465,155 455,150 460,162"/>
+    <line x1="320" y1="165" x2="465" y2="165"/><polygon points="465,165 455,160 455,170"/>
+  </g>
+  <g stroke="#2b6cb0" stroke-width="2" fill="#2b6cb0">
+    <line x1="465" y1="150" x2="185" y2="118"/><polygon points="185,118 195,113 198,124"/>
+    <line x1="465" y1="178" x2="185" y2="200"/><polygon points="185,200 195,196 197,206"/>
+    <line x1="465" y1="185" x2="320" y2="178"/><polygon points="320,178 310,173 310,183"/>
+  </g>
+  <text x="320" y="110" fill="#047857" font-size="10">A 发 →</text>
+  <text x="320" y="205" fill="#b45309" font-size="10">B 仅收 ←</text>
+  <text x="395" y="150" fill="#047857" font-size="10">C 发 →</text>
+</svg>

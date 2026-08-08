@@ -72,6 +72,7 @@
 
 ### M11 未来扩展（不在首版）
 - 多设备云同步、OCR 图片转文字、模板 / 片段库、插件市场。
+- **多设备云同步已进入设计阶段**：技术路线、协议、数据模型与实施计划见 [`clipstack-sync-design.md`](clipstack-sync-design.md)——采用「自托管中继 `clipstack-relay` + 端到端加密 + 组内共享（发布/接收分离）+ Cloudflare Tunnel 暴露」方案。
 
 ---
 
