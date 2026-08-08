@@ -72,6 +72,14 @@ pub fn clear_history(db: State<'_, DbState>) -> Result<(), String> {
     db::clear_history(&mut conn).map_err(|e| e.to_string())
 }
 
+/// 按 id 批量删除（软删入回收站，可回收站恢复）。用于「按当前查询条件清除」：
+/// 前端把 `filterItems` 命中的 id 列表传入，仅删除这些行，不影响其它条目。
+#[tauri::command]
+pub fn delete_items(db: State<'_, DbState>, ids: Vec<i64>) -> Result<usize, String> {
+    let mut conn = db.lock();
+    db::delete_items(&mut conn, &ids).map_err(|e| e.to_string())
+}
+
 /// 切换置顶，返回切换后状态。
 #[tauri::command]
 pub fn toggle_pin(db: State<'_, DbState>, id: i64) -> Result<bool, String> {

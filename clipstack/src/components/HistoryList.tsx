@@ -25,7 +25,7 @@ export function HistoryList() {
   const search = useHistory((s) => s.search);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
-  const { copy, pin, fav, del, clearAll } = useItemActions();
+  const { copy, pin, fav, del, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
@@ -62,7 +62,7 @@ export function HistoryList() {
         <div className="toolbar-right">
           <button
             className="clear-all-btn"
-            disabled={items.length === 0}
+            disabled={filtered.length === 0}
             onClick={() => setConfirmOpen(true)}
             title={t("list.clearAllTooltip")}
           >
@@ -109,7 +109,7 @@ export function HistoryList() {
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="confirm-title">{t("confirm.clearTitle")}</div>
             <div className="confirm-body">
-              {t("confirm.clearBody", { n: items.length })}
+              {t("confirm.clearBody", { n: filtered.length })}
             </div>
             <div className="confirm-actions">
               <button
@@ -122,7 +122,7 @@ export function HistoryList() {
                 className="confirm-btn danger"
                 onClick={() => {
                   setConfirmOpen(false);
-                  void clearAll();
+                  void clearFiltered(filtered.map((i) => i.id));
                 }}
               >
                 {t("confirm.clearConfirm")}

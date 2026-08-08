@@ -187,6 +187,7 @@ pub fn run() {
             commands::purge_item,
             commands::empty_trash,
             commands::clear_history,
+            commands::delete_items,
             commands::toggle_pin,
             commands::toggle_favorite,
             commands::update_setting,

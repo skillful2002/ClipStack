@@ -93,17 +93,17 @@ export function useItemActions() {
     }
   };
 
-  const clearAll = async () => {
+  const clearFiltered = async (ids: number[]) => {
     try {
-      await api.clearAllHistory();
-      // 主列表清空并刷新，回收站同步刷新（新条目已软删入回收站）。
+      const n = await api.deleteItems(ids);
+      // 删除命中的条目（软删入回收站），刷新主列表与回收站。
       void reload();
       void loadTrash();
-      setToast(t("toast.allMovedToTrash"));
+      setToast(t("toast.allMovedToTrash", { n }));
     } catch (e) {
       setToast(t("toast.clearFailed", { error: String(e) }));
     }
   };
 
-  return { copy, pin, fav, del, restore, purge, emptyTrash, clearAll };
+  return { copy, pin, fav, del, restore, purge, emptyTrash, clearFiltered };
 }

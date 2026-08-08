@@ -229,7 +229,27 @@ pub fn delete_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     tx.commit()
 }
 
-/// 读取回收站：按删除时间倒序。
+/// 批量删除：将指定 id 的 history 条目软删入回收站（与单条 `delete_item` 完全一致，可回收站恢复）。
+/// 用于「按当前查询条件清除」——前端把 `filterItems` 命中的 id 列表传入，由后端精确删除这些行。
+/// 空列表直接返回 0，避免无意义的写事务。
+pub fn delete_items(conn: &mut Connection, ids: &[i64]) -> rusqlite::Result<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let deleted_at = now_ms();
+    let tx = conn.transaction()?;
+    for &id in ids {
+        tx.execute(
+            "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at) \
+             SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ? \
+             FROM history WHERE id = ?",
+            params![deleted_at, id],
+        )?;
+        tx.execute("DELETE FROM history WHERE id = ?", [id])?;
+    }
+    tx.commit()?;
+    Ok(ids.len())
+}
 pub fn get_trash(conn: &Connection) -> rusqlite::Result<Vec<HistoryItem>> {
     let mut stmt = conn.prepare(
         "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at \
@@ -683,6 +703,34 @@ mod tests {
             .unwrap();
         assert_eq!(trash_count, 1);
     }
+
+    #[test]
+    fn delete_items_only_targeted_rows() {
+        let mut c = mem_db();
+        let keep = insert_or_bump(&c, &sample("keep", 100)).unwrap();
+        let a = insert_or_bump(&c, &sample("a", 200)).unwrap();
+        let b = insert_or_bump(&c, &sample("b", 300)).unwrap();
+        // 仅删除 a、b，保留 keep。
+        let n = delete_items(&mut c, &[a, b]).unwrap();
+        assert_eq!(n, 2);
+        let items = get_history(&c, 100, true).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, keep);
+        let trash_count: i64 = c
+            .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 2);
+    }
+
+    #[test]
+    fn delete_items_empty_is_noop() {
+        let mut c = mem_db();
+        insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let n = delete_items(&mut c, &[]).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(get_history(&c, 100, true).unwrap().len(), 1);
+    }
+
 
     #[test]
     fn insert_or_bump_dedups_by_hash() {

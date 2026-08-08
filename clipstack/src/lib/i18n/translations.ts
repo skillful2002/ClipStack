@@ -31,7 +31,7 @@ const zhCN: Dict = {
   "list.emptyDefault": "暂无剪贴板记录，复制点什么试试",
 
   "confirm.clearTitle": "清除全部记录",
-  "confirm.clearBody": "将把全部 {n} 条剪贴板记录移入回收站（可在回收站恢复），此操作不可撤销。",
+  "confirm.clearBody": "将把当前列表中 {n} 条剪贴板记录移入回收站（可在回收站恢复），此操作不可撤销。",
   "confirm.cancel": "取消",
   "confirm.clearConfirm": "清除全部",
 
@@ -122,7 +122,7 @@ const zhCN: Dict = {
   "toast.purgeFailed": "删除失败：{error}",
   "toast.trashEmptied": "回收站已清空",
   "toast.emptyFailed": "清空失败：{error}",
-  "toast.allMovedToTrash": "已全部移至回收站",
+  "toast.allMovedToTrash": "已移入回收站 {n} 条",
   "toast.clearFailed": "清除失败：{error}",
   "toast.ignoredAdded": "已忽略：{name}",
   "toast.ignoredRemoved": "已移除忽略：{name}",
@@ -163,7 +163,7 @@ const zhTW: Dict = {
   "list.emptyDefault": "暫無剪貼簿紀錄，複製點什麼試試",
 
   "confirm.clearTitle": "清除全部紀錄",
-  "confirm.clearBody": "將把全部 {n} 筆剪貼簿紀錄移入資源回收筒（可在資源回收筒復原），此操作不可撤銷。",
+  "confirm.clearBody": "將把目前清單中 {n} 筆剪貼簿紀錄移入資源回收筒（可在資源回收筒復原），此操作不可撤銷。",
   "confirm.cancel": "取消",
   "confirm.clearConfirm": "清除全部",
 
@@ -254,7 +254,7 @@ const zhTW: Dict = {
   "toast.purgeFailed": "刪除失敗：{error}",
   "toast.trashEmptied": "資源回收筒已清空",
   "toast.emptyFailed": "清空失敗：{error}",
-  "toast.allMovedToTrash": "已全部移至資源回收筒",
+  "toast.allMovedToTrash": "已移入資源回收筒 {n} 筆",
   "toast.clearFailed": "清除失敗：{error}",
   "toast.ignoredAdded": "已忽略：{name}",
   "toast.ignoredRemoved": "已移除忽略：{name}",
@@ -295,7 +295,7 @@ const en: Dict = {
   "list.emptyDefault": "No clipboard history yet. Copy something to try.",
 
   "confirm.clearTitle": "Clear All Records",
-  "confirm.clearBody": "This will move all {n} clipboard records to Trash (recoverable). This action cannot be undone.",
+  "confirm.clearBody": "This will move the {n} clipboard records currently shown to Trash (recoverable). This action cannot be undone.",
   "confirm.cancel": "Cancel",
   "confirm.clearConfirm": "Clear All",
 
@@ -386,7 +386,7 @@ const en: Dict = {
   "toast.purgeFailed": "Delete failed: {error}",
   "toast.trashEmptied": "Trash emptied",
   "toast.emptyFailed": "Empty failed: {error}",
-  "toast.allMovedToTrash": "All moved to Trash",
+  "toast.allMovedToTrash": "Moved {n} to Trash",
   "toast.clearFailed": "Clear failed: {error}",
   "toast.ignoredAdded": "Ignored: {name}",
   "toast.ignoredRemoved": "Removed from ignore: {name}",
@@ -427,7 +427,7 @@ const ja: Dict = {
   "list.emptyDefault": "クリップボードの履歴はまだありません。何かをコピーしてみてください。",
 
   "confirm.clearTitle": "すべての記録を消去",
-  "confirm.clearBody": "すべての {n} 件のクリップボード記録をゴミ箱に移動します（復元可能）。この操作は取り消せません。",
+  "confirm.clearBody": "現在のリストにある {n} 件のクリップボード記録をゴミ箱に移動します（復元可能）。この操作は取り消せません。",
   "confirm.cancel": "キャンセル",
   "confirm.clearConfirm": "すべて消去",
 
@@ -518,7 +518,7 @@ const ja: Dict = {
   "toast.purgeFailed": "削除に失敗しました: {error}",
   "toast.trashEmptied": "ゴミ箱を空にしました",
   "toast.emptyFailed": "空にするのに失敗しました: {error}",
-  "toast.allMovedToTrash": "すべてゴミ箱に移動しました",
+  "toast.allMovedToTrash": "ゴミ箱に {n} 件を移動しました",
   "toast.clearFailed": "消去に失敗しました: {error}",
   "toast.ignoredAdded": "無視しました: {name}",
   "toast.ignoredRemoved": "無視から削除しました: {name}",
@@ -559,7 +559,7 @@ const de: Dict = {
   "list.emptyDefault": "Noch keine Zwischenablage-Historie. Kopieren Sie etwas zum Testen.",
 
   "confirm.clearTitle": "Alle Einträge löschen",
-  "confirm.clearBody": "Hiermit werden alle {n} Zwischenablage-Einträge in den Papierkorb verschoben (wiederherstellbar). Dieser Vorgang kann nicht rückgängig gemacht werden.",
+  "confirm.clearBody": "Hiermit werden die aktuell angezeigten {n} Zwischenablage-Einträge in den Papierkorb verschoben (wiederherstellbar). Dieser Vorgang kann nicht rückgängig gemacht werden.",
   "confirm.cancel": "Abbrechen",
   "confirm.clearConfirm": "Alle löschen",
 
@@ -650,7 +650,7 @@ const de: Dict = {
   "toast.purgeFailed": "Löschen fehlgeschlagen: {error}",
   "toast.trashEmptied": "Papierkorb geleert",
   "toast.emptyFailed": "Leeren fehlgeschlagen: {error}",
-  "toast.allMovedToTrash": "Alle in den Papierkorb verschoben",
+  "toast.allMovedToTrash": "{n} in den Papierkorb verschoben",
   "toast.clearFailed": "Löschen fehlgeschlagen: {error}",
   "toast.ignoredAdded": "Ignoriert: {name}",
   "toast.ignoredRemoved": "Aus Ignorieren entfernt: {name}",
@@ -691,7 +691,7 @@ const fr: Dict = {
   "list.emptyDefault": "Aucun historique du presse-papiers pour l'instant. Copiez quelque chose pour essayer.",
 
   "confirm.clearTitle": "Effacer tous les enregistrements",
-  "confirm.clearBody": "Cela déplacera tous les {n} enregistrements du presse-papiers vers la Corbeille (récupérable). Cette action est irréversible.",
+  "confirm.clearBody": "Cela déplacera les {n} enregistrements du presse-papiers actuellement affichés vers la Corbeille (récupérable). Cette action est irréversible.",
   "confirm.cancel": "Annuler",
   "confirm.clearConfirm": "Tout effacer",
 
@@ -782,7 +782,7 @@ const fr: Dict = {
   "toast.purgeFailed": "Échec de la suppression : {error}",
   "toast.trashEmptied": "Corbeille vidée",
   "toast.emptyFailed": "Échec du vidage : {error}",
-  "toast.allMovedToTrash": "Tout déplacé vers la Corbeille",
+  "toast.allMovedToTrash": "{n} déplacé(s) vers la Corbeille",
   "toast.clearFailed": "Échec de l'effacement : {error}",
   "toast.ignoredAdded": "Ignoré : {name}",
   "toast.ignoredRemoved": "Retiré des ignorées : {name}",

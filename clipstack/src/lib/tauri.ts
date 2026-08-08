@@ -34,6 +34,10 @@ export const emptyTrash = (): Promise<void> => invoke<void>("empty_trash");
 /** 清空全部历史（软删入回收站，可回收站恢复）。 */
 export const clearAllHistory = (): Promise<void> => invoke<void>("clear_history");
 
+/** 按 id 批量删除（软删入回收站，可回收站恢复）。用于「按当前查询条件清除」。 */
+export const deleteItems = (ids: number[]): Promise<number> =>
+  invoke<number>("delete_items", { ids });
+
 /** 切换置顶，返回切换后状态。 */
 export const togglePin = (id: number): Promise<boolean> =>
   invoke<boolean>("toggle_pin", { id });
