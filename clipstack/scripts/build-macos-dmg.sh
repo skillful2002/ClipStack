@@ -20,7 +20,7 @@ cd "$ROOT"
 
 PRODUCT_NAME="ClipStack"
 APP_BIN="clipstack"          # .app 内可执行文件名（cargo bin name）
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 # 目标架构：默认本机 host triple
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
