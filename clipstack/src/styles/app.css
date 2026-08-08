@@ -17,6 +17,7 @@
 }
 
 .sidebar-search {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -36,6 +37,24 @@
   background: transparent;
   font-size: 13px;
   color: var(--cs-text-primary);
+  padding-right: 32px;
+}
+
+/* 搜索框内的快捷键提示（kbd 风格，靠右弱化显示） */
+.search-shortcut {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: var(--cs-text-tertiary);
+  background: var(--cs-bg-secondary, rgba(128, 128, 128, 0.12));
+  border: 1px solid var(--cs-border);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .sidebar-nav {
@@ -93,6 +112,29 @@
 .nav-count {
   font-size: 12px;
   color: var(--cs-text-tertiary);
+}
+
+/* 侧边栏导航项后的快捷键提示（靠右、弱化、等宽数字）。 */
+.nav-shortcut {
+  flex-shrink: 0;
+  margin-left: 8px;
+  padding-left: 4px;
+  font-size: 11px;
+  color: var(--cs-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
+/* 详情操作按钮后的快捷键提示。 */
+.btn-shortcut {
+  flex-shrink: 0;
+  margin-left: 1px;
+  font-size: 11px;
+  color: var(--cs-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  user-select: none;
 }
 
 /* ===== 主区域（三栏容器） ===== */
@@ -627,7 +669,13 @@
 .settings-card-title {
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 8px;
+  color: var(--cs-text-primary);
+  margin: -18px -18px 14px;
+  padding: 12px 18px;
+  background: var(--cs-section-title-bg);
+  border-bottom: 1px solid var(--cs-border);
+  border-top-left-radius: calc(var(--cs-radius-lg) - 1px);
+  border-top-right-radius: calc(var(--cs-radius-lg) - 1px);
 }
 
 .settings-hint {
@@ -862,6 +910,7 @@
   --cs-text-tertiary: #6b7280;
   --cs-accent: #10b981;
   --cs-accent-soft: #0f2c24;
+  --cs-section-title-bg: #1a1d21;
 }
 
 /* ===== P6 设置控件：行布局 / 分段选择 / 开关 ===== */

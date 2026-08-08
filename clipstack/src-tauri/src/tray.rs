@@ -84,11 +84,17 @@ fn build_menu(
         let empty = MenuItem::with_id(app, "empty", tray_empty(lang), false, None::<&str>)?;
         menu.append(&empty)?;
     } else {
-        for it in &recent {
+        for (idx, it) in recent.iter().enumerate() {
             let label = truncate(&it.preview, 40);
             let id = format!("copy:{}", it.id);
             let icon = type_tray_icon(it.content_type)?;
-            let item = IconMenuItemBuilder::with_id(id, label).icon(icon).build(app)?;
+            // 前 9 条历史绑定 ⌘1–⌘9，在托盘菜单打开时按数字即可快速复制；
+            // 菜单项 accelerator 仅在菜单可见时生效，不会注册成全局热键，与侧边栏 ⌘1–⌘6 不冲突。
+            let mut builder = IconMenuItemBuilder::with_id(id, label).icon(icon);
+            if idx < 9 {
+                builder = builder.accelerator(&format!("CmdOrCtrl+{}", idx + 1));
+            }
+            let item = builder.build(app)?;
             menu.append(&item)?;
         }
     }
@@ -102,11 +108,13 @@ fn build_menu(
     menu.append(
         &IconMenuItemBuilder::with_id("open_main", tray_open_main(lang))
             .icon(open_icon)
+            .accelerator("CmdOrCtrl+Shift+V")
             .build(app)?,
     )?;
     menu.append(
         &IconMenuItemBuilder::with_id("settings", tray_settings(lang))
             .icon(settings_icon)
+            .accelerator("CmdOrCtrl+,")
             .build(app)?,
     )?;
     // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。

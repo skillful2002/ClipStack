@@ -6,7 +6,7 @@ import type { ResolvedLang } from "./types";
 type Dict = Record<string, string>;
 
 const zhCN: Dict = {
-  "sidebar.searchPlaceholder": "搜索剪贴板内容…  (⌘K)",
+  "sidebar.searchPlaceholder": "搜索剪贴板内容…",
   "sidebar.searchAria": "搜索",
   "sidebar.all": "全部",
   "sidebar.trash": "回收站",
@@ -138,7 +138,7 @@ const zhCN: Dict = {
 };
 
 const zhTW: Dict = {
-  "sidebar.searchPlaceholder": "搜尋剪貼簿內容…  (⌘K)",
+  "sidebar.searchPlaceholder": "搜尋剪貼簿內容…",
   "sidebar.searchAria": "搜尋",
   "sidebar.all": "全部",
   "sidebar.trash": "資源回收筒",
@@ -270,7 +270,7 @@ const zhTW: Dict = {
 };
 
 const en: Dict = {
-  "sidebar.searchPlaceholder": "Search clipboard…  (⌘K)",
+  "sidebar.searchPlaceholder": "Search clipboard…",
   "sidebar.searchAria": "Search",
   "sidebar.all": "All",
   "sidebar.trash": "Trash",
@@ -402,7 +402,7 @@ const en: Dict = {
 };
 
 const ja: Dict = {
-  "sidebar.searchPlaceholder": "クリップボードを検索…  (⌘K)",
+  "sidebar.searchPlaceholder": "クリップボードを検索…",
   "sidebar.searchAria": "検索",
   "sidebar.all": "すべて",
   "sidebar.trash": "ゴミ箱",
@@ -534,7 +534,7 @@ const ja: Dict = {
 };
 
 const de: Dict = {
-  "sidebar.searchPlaceholder": "Zwischenablage suchen…  (⌘K)",
+  "sidebar.searchPlaceholder": "Zwischenablage suchen…",
   "sidebar.searchAria": "Suchen",
   "sidebar.all": "Alle",
   "sidebar.trash": "Papierkorb",
@@ -666,7 +666,7 @@ const de: Dict = {
 };
 
 const fr: Dict = {
-  "sidebar.searchPlaceholder": "Rechercher dans le presse-papiers…  (⌘K)",
+  "sidebar.searchPlaceholder": "Rechercher dans le presse-papiers…",
   "sidebar.searchAria": "Rechercher",
   "sidebar.all": "Tout",
   "sidebar.trash": "Corbeille",

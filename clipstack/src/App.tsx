@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { emit } from "@tauri-apps/api/event";
-import { useHistory } from "./store/history";
+import { useHistory, type Category } from "./store/history";
 import {
   onClipboardChanged,
   onShowView,
@@ -10,6 +10,7 @@ import {
   getSettings,
   wasFirstRun,
 } from "./lib/tauri";
+import { useItemActions } from "./lib/actions";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
 import { useI18nStore, getResolvedLang, translate, type Language } from "./lib/i18n";
 import { Sidebar } from "./components/Sidebar";
@@ -30,6 +31,7 @@ export default function App() {
   const setToast = useHistory((s) => s.setToast);
   const setView = useHistory((s) => s.setView);
   const select = useHistory((s) => s.select);
+  const { copy, pin, fav, del } = useItemActions();
 
   // 启动：加载历史、应用已保存主题、订阅系统主题变化、订阅剪贴板变更。
   const themeUnlistenRef = useRef<() => void>(() => {});
@@ -85,10 +87,10 @@ export default function App() {
     };
   }, [setView, select, setToast]);
 
-  // P5：⌘K / Ctrl+K 聚焦搜索框。
+  // P5：⌘/ / Ctrl+/ 聚焦搜索框（⌘K 常被其它程序全局占用且优先级更高，改用 ⌘/）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
         e.preventDefault();
         document.getElementById("clipstack-search")?.focus();
       }
@@ -96,6 +98,68 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // 快捷键：分类切换（⌘1-⌘6）、设置（⌘,）、回收站（⌘⇧T），以及主界面条目操作
+  // （⏎ 复制 / P 置顶 / F 收藏 / ⌫·Del 删除）。输入框或按钮聚焦时跳过单键动作，避免误触。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable);
+      const k = e.key.toLowerCase();
+
+      // 修饰键组合：输入框中也允许，便于随时切换分类 / 视图。
+      if (e.metaKey || e.ctrlKey) {
+        if (k >= "1" && k <= "6") {
+          e.preventDefault();
+          const map: Record<string, Category> = {
+            "1": "all", "2": "text", "3": "link",
+            "4": "code", "5": "image", "6": "file",
+          };
+          const st = useHistory.getState();
+          st.setCategory(map[k]);
+          st.setView("main");
+          return;
+        }
+        if (k === ",") {
+          e.preventDefault();
+          useHistory.getState().setView("settings");
+          return;
+        }
+        if (e.shiftKey && k === "t") {
+          e.preventDefault();
+          useHistory.getState().setView("trash");
+          return;
+        }
+        return; // 其它组合（如 ⌘/ 聚焦搜索）交由其它监听处理
+      }
+
+      // 单键动作：仅主界面、且未聚焦输入框 / 按钮时生效。
+      if (typing || (el && el.tagName === "BUTTON")) return;
+      const st = useHistory.getState();
+      if (st.view !== "main") return;
+      const item = st.items.find((i) => i.id === st.selectedId);
+      if (!item) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void copy(item);
+      } else if (k === "p") {
+        e.preventDefault();
+        void pin(item);
+      } else if (k === "f") {
+        e.preventDefault();
+        void fav(item);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        void del(item);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [copy, pin, fav, del]);
 
   // 进入回收站视图时拉取已删除条目。
   useEffect(() => {

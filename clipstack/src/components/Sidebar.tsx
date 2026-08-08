@@ -5,6 +5,7 @@ import { useHistory, type Category } from "../store/history";
 import type { ContentType } from "../types";
 import { TYPE_META } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { NAV_SHORTCUTS } from "../lib/shortcuts";
 import {
   SearchIcon,
   TypeIcon,
@@ -54,6 +55,7 @@ export function Sidebar() {
           onChange={(e) => setSearch(e.target.value)}
           aria-label={t("sidebar.searchAria")}
         />
+        <span className="search-shortcut">{NAV_SHORTCUTS.search}</span>
       </div>
 
       <nav className="sidebar-nav">
@@ -70,6 +72,7 @@ export function Sidebar() {
               {cat.type ? <TypeIcon type={cat.type} size={16} /> : <AllIcon size={16} />}
             </span>
             <span className="nav-label">{categoryLabel(cat)}</span>
+            <span className="nav-shortcut">{NAV_SHORTCUTS[cat.key]}</span>
             <span className="nav-count">{counts[cat.key] ?? 0}</span>
           </button>
         ))}
@@ -84,6 +87,7 @@ export function Sidebar() {
             <SettingsIcon size={16} />
           </span>
           <span className="nav-label">{t("sidebar.settings")}</span>
+          <span className="nav-shortcut">{NAV_SHORTCUTS.settings}</span>
         </button>
         <button
           className={`nav-item${view === "trash" ? " active" : ""}`}
@@ -93,6 +97,7 @@ export function Sidebar() {
             <TrashBinIcon size={16} />
           </span>
           <span className="nav-label">{t("sidebar.trash")}</span>
+          <span className="nav-shortcut">{NAV_SHORTCUTS.trash}</span>
         </button>
         <button
           className={`nav-item${view === "about" ? " active" : ""}`}

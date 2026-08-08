@@ -3,6 +3,7 @@
 import type { HistoryItem } from "../types";
 import { TYPE_META, relativeTime } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { ACTION_SHORTCUTS } from "../lib/shortcuts";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
 
 interface Props {
@@ -50,16 +51,16 @@ export function HistoryItemRow({
       </div>
 
       <div className="item-actions" onClick={(e) => e.stopPropagation()}>
-        <button title={t("action.copy")} onClick={() => onCopy(item)}>
+        <button title={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`} onClick={() => onCopy(item)}>
           <CopyIcon size={15} />
         </button>
-        <button title={item.isPinned ? t("action.unpin") : t("action.pin")} onClick={() => onPin(item)}>
+        <button title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`} onClick={() => onPin(item)}>
           <PinIcon size={15} active={item.isPinned} />
         </button>
-        <button title={item.isFavorite ? t("action.unfav") : t("action.fav")} onClick={() => onFav(item)}>
+        <button title={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`} onClick={() => onFav(item)}>
           <StarIcon size={15} active={item.isFavorite} />
         </button>
-        <button title={t("action.delete")} className="danger" onClick={() => onDelete(item)}>
+        <button title={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`} className="danger" onClick={() => onDelete(item)}>
           <TrashIcon size={15} />
         </button>
       </div>

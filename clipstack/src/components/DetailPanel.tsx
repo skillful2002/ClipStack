@@ -7,6 +7,7 @@ import { useItemActions } from "../lib/actions";
 import { getItemBlob } from "../lib/tauri";
 import { TYPE_META, formatBytes, fullDateTime } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { ACTION_SHORTCUTS } from "../lib/shortcuts";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
 
 export function DetailPanel() {
@@ -146,15 +147,19 @@ export function DetailPanel() {
       <div className="detail-actions" ref={actionsRef}>
         <button className="primary" onClick={() => copy(item)}>
           <CopyIcon size={15} /> {t("action.copy")}
+          <span className="btn-shortcut">{ACTION_SHORTCUTS.copy}</span>
         </button>
         <button onClick={() => pin(item)}>
           <PinIcon size={15} active={item.isPinned} /> {item.isPinned ? t("action.unpin") : t("action.pin")}
+          <span className="btn-shortcut">{ACTION_SHORTCUTS.pin}</span>
         </button>
         <button onClick={() => fav(item)}>
           <StarIcon size={15} active={item.isFavorite} /> {item.isFavorite ? t("action.unfav") : t("action.fav")}
+          <span className="btn-shortcut">{ACTION_SHORTCUTS.fav}</span>
         </button>
         <button className="danger" onClick={() => del(item)}>
           <TrashIcon size={15} /> {t("action.delete")}
+          <span className="btn-shortcut">{ACTION_SHORTCUTS.del}</span>
         </button>
       </div>
     </aside>
