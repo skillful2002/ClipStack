@@ -120,6 +120,17 @@
   - **应用图标**（`b408c97`）：新增 `gen_app_icon.py` 生成蓝紫剪贴板源图标，`tauri icon` 生成全套平台图标（mac `icon.icns` / Win `icon.ico` / 通用 `icon.png` + 32/64/128/iOS/Android/StoreLogo 系列）替换默认 Tauri 图标；托盘经 `default_window_icon()` 自动复用。
   - ⚠️ **图标排障要点**：图标由 `tauri-build` 编译期嵌入二进制，仅 `tauri.conf.json` 变动才重嵌；改 PNG 后需 `touch tauri.conf.json` 重启 dev 才生效。**dev 模式 Dock 不显示自定义应用图标**（不打包 .app），`tauri build` 后才出现。详见 `docs/clipstack-packaging.md`.
 
+- **2026-08-09 · 安全改造（P0 加密 + 应用锁 + P1 留存 / 敏感 / 掩码 + Touch ID + 托盘优化）**
+  - 两个提交落地全部安全能力（`909814b9` feat: 安全改造落地与托盘菜单/图标优化；`234f25a4` fix: 修复锁定流程——托盘解锁弹锁屏 + 立即锁定关闭主窗体）。质量门禁全绿：`cargo test` **50 passed / 0 failed**、`cargo clippy --all-targets` 0 告警、前端 `npm run build` 通过。
+  - **数据库加密（应用层 AES-256-GCM）**：仅加密 `content_text` / `content_blob` 两列，其它字段明文；密钥以文件 `~/.clipstack/dbkey.dat`（权限 600）持久化并常驻内存，与用户主密码完全无关（老库明文解锁后自动转密文）。
+  - **应用锁 + Touch ID**：主密码（Argon2id 校验 `pw_salt` / `pw_verifier`）仅作应用锁，不派生 / 不清空 DB 密钥；`lock()` 只置标记，锁定态仍照常加密捕获；Touch ID 改用系统 `LocalAuthentication`（LAContext）经 `/usr/bin/swift` 子进程验证，不在钥匙串存令牌（替代已放弃的钥匙串 `BiometryCurrentSet` 方案）。
+  - **保存类型三分类**：设置新增 文本 / 图片 / 文件 开关，控制捕获范围（仅影响新捕获）。
+  - **留存过期**：`retention_days` + `purge_expired` 同时清理 history（按 `created_at`）与 trash（按 `deleted_at`）。
+  - **敏感内容识别 + 掩码**：零新增 crate 手工实现（Token 形态 / Luhn / 强密码启发式：长度 ≥ 12 + 无空白 + ≥ 3 类 + 熵 > 3.0）；命中项在列表与详情以 •••••• 遮挡预览，原文仍加密且可复制（掩码按读取时实时计算，开关即时生效）。
+  - **托盘脱敏 + 图标统一**：锁定态与敏感项在托盘菜单显示占位，零明文泄漏；托盘菜单「使用帮助」图标与设置同色系。
+  - **P2 加固**：`tauri.conf.json` 收紧 CSP；`secure_delete=ON` + 清空后 `VACUUM`；`RawContent` 实现 `Drop` 用 `zeroize` 擦除明文缓冲。
+  - 详细设计见 `docs/安全改造方案.md`，实施状态与验收结论见其 §15。
+
 ## 通用验证手段（每阶段都跑）
 
 - **Rust**：`cargo test`（单测）、`cargo clippy -D warnings`（零告警）

@@ -5,7 +5,7 @@
 ClipStack is a **cross-platform clipboard manager** that lives in your menu bar / system tray and runs quietly in the background. It supports **macOS** and **Windows**. It captures everything you copy — text, links, code, images, and files — in real time, and gives you full-text search, smart categorization, and one-click reuse, so your clipboard becomes **searchable, browsable, and reusable**.
 
 - App identifier: `tech.newxin-clipstack.app`
-- Current version: `0.1.0`
+- Current version: `0.1.2`
 - Stack: Tauri 2 + React 18 + TypeScript + Vite + Rust (SQLite persistence)
 
 ---
@@ -72,7 +72,7 @@ npm run tauri dev        # run the full Tauri app (frontend + native window)
 1. Launch ClipStack — it resides in the menu bar / tray.
 2. Copy as usual (`⌘C` / `Ctrl C`) — ClipStack records it automatically.
 3. Press `⌘⇧V` / `Ctrl Shift V` to open the main window, or click the menu bar / tray icon for recent history.
-4. Press `⌘K` / `Ctrl K` to search; press Enter or click to copy an item back to the clipboard.
+4. Press `⌘/` / `Ctrl+/` to search; press Enter or click to copy an item back to the clipboard.
 5. Right-click an item to pin, favorite, or delete (deletes go to the trash and can be restored).
 
 ---
@@ -135,7 +135,7 @@ The local database contains four tables: `history`, `trash`, `settings`, and `ig
 | settings | key / value | Appearance, capacity, autostart, etc. |
 | ignored_apps | name | Skip capture by app name (case-insensitive) |
 
-Storage of `content_blob`: images store the PNG bytes; **files store a JSON array of paths** (not the file contents), and `content_text` additionally holds the full paths joined by `, ` for list display. All data is stored locally with no cloud sync by default — your clipboard stays private.
+Storage of `content_blob`: images store the PNG bytes; **files store a JSON array of paths** (not the file contents), and `content_text` additionally holds the full paths joined by `, ` for list display. All data is stored locally with no cloud sync by default — your clipboard stays private. The `content_text` / `content_blob` columns are stored encrypted (app-layer AES-256-GCM); other columns stay in plaintext for querying.
 
 ---
 
@@ -148,7 +148,7 @@ For the full developer reference — environment setup, build commands, coding c
 - [`docs/clipstack-build-steps.md`](docs/clipstack-build-steps.md) — Step-by-step build log & progress
 - [`docs/clipstack-packaging.md`](docs/clipstack-packaging.md) — Local build, macOS signing + notarization, Windows `.msi`, CI
 
-Quality gates: Rust `cargo test` (32/32), `cargo clippy --all-targets` (0 warnings); frontend `npm run build` (tsc + vite) passes.
+Quality gates: Rust `cargo test` (50/50), `cargo clippy --all-targets` (0 warnings); frontend `npm run build` (tsc + vite) passes.
 
 ---
 

@@ -5,8 +5,8 @@
 //     以便去重与查询无需解密。
 //   - 内容用 AES-256-GCM 加密（`nonce(12B) || ciphertext`），`content_text` 以 base64 存 TEXT、
 //     `content_blob` 以原始字节存 BLOB。
-//   - 主密钥由主密码经 Argon2id 派生（m=64MiB, t=3, p=4），与 `pw_verifier`（Argon2 哈希）同源同盐。
-//   - 派生出的 32B 密钥在内存中以 `Key` 包裹，drop 时清零（zeroize）。
+//   - 数据库内容加密密钥为内部固定密钥（`Key` 包裹，drop 时清零），独立于用户主密码；
+//     主密码仅经 Argon2id 计算 `pw_verifier` 用于应用锁校验，不再派生任何加密密钥。
 
 use std::fmt;
 
@@ -43,15 +43,6 @@ pub fn random_salt() -> [u8; 16] {
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
     salt
-}
-
-/// 由主密码 + 盐派生 32 字节主密钥。
-pub fn derive_key(pwd: &str, salt: &[u8; 16]) -> Key {
-    let a = argon2();
-    let mut key = [0u8; 32];
-    a.hash_password_into(pwd.as_bytes(), salt, &mut key)
-        .expect("argon2 key derivation failed");
-    Key(key)
 }
 
 /// 计算主密码的 Argon2 哈希（存储为 `pw_verifier`，含盐与参数），用于后续校验。
@@ -110,17 +101,8 @@ mod tests {
     }
 
     #[test]
-    fn same_password_same_salt_same_key() {
-        let salt = random_salt();
-        let k1 = derive_key("pw", &salt);
-        let k2 = derive_key("pw", &salt);
-        assert_eq!(k1.0, k2.0);
-    }
-
-    #[test]
     fn aes_roundtrip() {
-        let salt = random_salt();
-        let key = derive_key("pw", &salt);
+        let key = Key([0u8; 32]);
         let pt = b"secret clipboard content";
         let sealed = encrypt(&key, pt);
         assert_ne!(&sealed[..], pt);
@@ -130,9 +112,8 @@ mod tests {
 
     #[test]
     fn wrong_key_cannot_decrypt() {
-        let salt = random_salt();
-        let k1 = derive_key("pw1", &salt);
-        let k2 = derive_key("pw2", &salt);
+        let k1 = Key([1u8; 32]);
+        let k2 = Key([2u8; 32]);
         let sealed = encrypt(&k1, b"data");
         assert!(decrypt(&k2, &sealed).is_none());
     }
@@ -140,8 +121,7 @@ mod tests {
     #[test]
     fn key_zeroized_on_drop() {
         // 仅验证 Key 可正常构造与 drop（zeroize 在 drop 时执行，无 panic 即可）。
-        let salt = random_salt();
-        let key = derive_key("pw", &salt);
+        let key = Key([0u8; 32]);
         assert_eq!(key.0.len(), 32);
         drop(key);
     }

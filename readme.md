@@ -7,7 +7,7 @@ ClipStack 是一款常驻后台的**跨平台剪贴板管理工具**，支持 ma
 支持多种语言：简体中文、繁体中文、英文、日文、德文、法文。
 
 - 应用标识：`tech.newxin-clipstack.app`
-- 当前版本：`0.1.0`
+- 当前版本：`0.1.2`
 - 技术栈：Tauri 2 + React 18 + TypeScript + Vite + Rust（SQLite 持久化）
 
 ---
@@ -79,6 +79,10 @@ npm run tauri dev        # 启动完整 Tauri 应用（前端 + 原生窗口）
 3. 点菜单栏 / 托盘图标下拉最近历史,并可打开主窗口、设置窗口等。
 4. 鼠标放在条目上，可可置顶、收藏、删除（删除进入回收站，可恢复）。
 
+### 忘记主密码？
+
+如果你忘记了 ClipStack 的主密码、无法解锁应用：**退出程序，然后重新启动程序**，在主窗口打开后进入「设置 → 安全」，点击「清除主密码」即可移除应用锁（无需输入旧密码）。清除后应用将不再要求密码即可解锁；你的剪贴板数据仍以本地密钥加密存储，不受影响。
+
 ---
 
 ## 五、界面预览
@@ -139,7 +143,7 @@ clipboards/
 | settings | key / value | 外观、容量、自启等 |
 | ignored_apps | name | 按应用名（大小写不敏感）跳过捕获 |
 
-`content_blob` 的存储策略：图片存 PNG 二进制；**文件存 JSON 路径数组**（不含文件内容），`content_text` 同时保存以 `, ` 拼接的完整路径用于列表展示。所有数据均存储于本地，默认无云端同步，隐私可控。
+`content_blob` 的存储策略：图片存 PNG 二进制；**文件存 JSON 路径数组**（不含文件内容），`content_text` 同时保存以 `, ` 拼接的完整路径用于列表展示。所有数据均存储于本地，默认无云端同步，隐私可控。其中 `content_text` / `content_blob` 两列已加密存储（应用层 AES-256-GCM），其余字段保持明文以便查询。
 
 ---
 
@@ -152,7 +156,7 @@ clipboards/
 - [`docs/clipstack-build-steps.md`](docs/clipstack-build-steps.md) — 逐阶段开发步骤与进度记录
 - [`docs/clipstack-packaging.md`](docs/clipstack-packaging.md) — 本地构建、macOS 签名+公证、Windows `.msi`、CI
 
-质量门禁：Rust `cargo test`（32/32）、`cargo clippy --all-targets`（0 告警）；前端 `npm run build`（tsc + vite）通过。
+质量门禁：Rust `cargo test`（50/50）、`cargo clippy --all-targets`（0 告警）；前端 `npm run build`（tsc + vite）通过。
 
 ---
 

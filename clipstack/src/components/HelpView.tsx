@@ -85,6 +85,18 @@ export function HelpView() {
             <li>{t("help.settingsLanguage")}</li>
             <li>{t("help.settingsStorage")}</li>
             <li>{t("help.settingsStartup")}</li>
+            <li>{t("help.settingsSecurity")}</li>
+          </ul>
+        </Section>
+
+        <Section title={t("help.security")}>
+          <ul className="help-ul">
+            <li>{t("help.securityEnc")}</li>
+            <li>{t("help.securityLock")}</li>
+            <li>{t("help.securityMask")}</li>
+            <li>{t("help.securityRetention")}</li>
+            <li>{t("help.securitySaveTypes")}</li>
+            <li>{t("help.securityForgot")}</li>
           </ul>
         </Section>
 

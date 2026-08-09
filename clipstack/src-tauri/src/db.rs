@@ -586,11 +586,6 @@ pub fn clear_master_password(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// 读取主密码盐（hex）。
-pub fn get_pw_salt(conn: &Connection) -> String {
-    get_string_setting(conn, "pw_salt", "")
-}
-
 /// 读取主密码校验哈希。
 pub fn get_pw_verifier(conn: &Connection) -> String {
     get_string_setting(conn, "pw_verifier", "")
@@ -652,35 +647,6 @@ pub fn reencrypt_all(conn: &Connection, old: &Key, new: &Key) -> rusqlite::Resul
             conn.execute(
                 &format!("UPDATE {table} SET content_text = ?, content_blob = ? WHERE id = ?"),
                 params![new_enc, new_blob, id],
-            )?;
-            n += 1;
-        }
-    }
-    Ok(n)
-}
-
-/// 清除主密码时：用当前密钥解密全部 `content_text` / `content_blob` 并转回明文存储
-/// （此后应用不再持有密钥）。解密失败（非本密钥加密）的内容保留原样。
-pub fn decrypt_all_to_plaintext(conn: &Connection, key: &Key) -> rusqlite::Result<usize> {
-    let mut n = 0;
-    for table in ["history", "trash"] {
-        let mut stmt = conn.prepare(&format!("SELECT id, content_text, content_blob FROM {table}"))?;
-        let rows: Vec<(i64, String, Option<Vec<u8>>)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(stmt);
-        for (id, text, blob) in rows {
-            // 解码 base64；失败说明本就是明文（未迁移遗留），原样保留。
-            let plain_bytes = match STANDARD.decode(&text) {
-                Ok(ct) => crypto::decrypt(key, &ct).unwrap_or_else(|| text.as_bytes().to_vec()),
-                Err(_) => text.into_bytes(),
-            };
-            let plain_text = String::from_utf8_lossy(&plain_bytes).to_string();
-            // 明文 blob：解密失败（非加密遗留）时保留为 NULL，避免残留密文被误当图片/文件。
-            let plain_blob = blob.and_then(|b| crypto::decrypt(key, &b));
-            conn.execute(
-                &format!("UPDATE {table} SET content_text = ?, content_blob = ? WHERE id = ?"),
-                params![plain_text, plain_blob, id],
             )?;
             n += 1;
         }
@@ -1391,32 +1357,5 @@ mod tests {
 
         // days<=0 不删除
         assert_eq!(purge_expired(&c, 0).unwrap(), 0);
-    }
-
-    /// 清除主密码：用密钥解密全部已加密内容回明文。
-    #[test]
-    fn decrypt_all_to_plaintext_roundtrip() {
-        let c = mem_db();
-        let key = Key([7u8; 32]);
-        let secret = b"top-secret-token-123";
-        let enc = STANDARD.encode(crypto::encrypt(&key, secret));
-        c.execute(
-            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) \
-             VALUES ('text', ?, 'App', ?, 'h1', 1000)",
-            params![enc, secret.len() as i64],
-        )
-        .unwrap();
-        // 解密前：存储的是 base64 密文，不等于原文。
-        let before: String = c
-            .query_row("SELECT content_text FROM history WHERE id=1", [], |r| r.get(0))
-            .unwrap();
-        assert_ne!(before, std::str::from_utf8(secret).unwrap());
-        // 解密后：恢复明文。
-        let n = decrypt_all_to_plaintext(&c, &key).unwrap();
-        assert_eq!(n, 1);
-        let after: String = c
-            .query_row("SELECT content_text FROM history WHERE id=1", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(after, std::str::from_utf8(secret).unwrap());
     }
 }
