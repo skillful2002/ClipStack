@@ -19,8 +19,10 @@ use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
 use tauri::{AppHandle, Emitter};
+use zeroize::Zeroize;
 
-use crate::db::{self, AppDb, DbState, now_ms};
+use crate::crypto::Key;
+use crate::db::{self, AppDb, DbState, now_ms, SENSITIVE_MASK};
 use crate::models::{ContentType, HistoryItem, NewItem};
 
 /// 去重时间窗：同一 hash 在此窗口内再次出现视为重复，不再广播 / 入库。
@@ -66,6 +68,20 @@ impl Hash for RawContent {
     }
 }
 
+/// P2 · 内存清零：剪贴板明文在捕获周期结束后从内存擦除（Text 字符串 / Image 字节）。
+/// `RawContent` 为独占所有权、无 Clone，捕获流程中仅移动一次并在 `capture` 末尾 drop，
+/// 故此处清零不会影响分类 / 去重 / 加密前的读取（那些都在 drop 之前发生）。
+impl Drop for RawContent {
+    fn drop(&mut self) {
+        match self {
+            RawContent::Text(s) => s.zeroize(),
+            RawContent::Image { bytes, .. } => bytes.zeroize(),
+            // 文件路径本身非敏感正文，无需擦除。
+            RawContent::Files(_) | RawContent::None => {}
+        }
+    }
+}
+
 /// 监控共享状态：去重队列 + 忽略应用集合。由 Tauri 托管，供命令与监控线程共享。
 pub struct MonitorState {
     recent: VecDeque<(u64, Instant)>,
@@ -107,6 +123,9 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
 
 /// 读取 + 分类 + 去重 + 来源过滤 + 落库，产出可广播的条目；被忽略 / 去重 / 无内容 / 落库失败返回 None。
 fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> {
+    // 内部数据库加密密钥在启动阶段已载入内存（db.key 常驻），用于落库加密；
+    // 主密码仅作为「应用锁」凭据，不影响此处加密。因此无论是否锁定、是否启用主密码，
+    // 捕获到的内容都以内部密钥加密存储，复制永不丢失。
     let source = current_app_name();
 
     // 忽略列表过滤（来源应用名小写匹配）。
@@ -129,8 +148,38 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         return None;
     }
 
-    let (content_type, preview, content_text, content_blob, size) = materialize(&raw);
+    let (content_type, _preview, content_text, content_blob, size) = materialize(&raw);
+
+    // P1c · 敏感内容识别：命中规则（文本 / 链接 / 代码类）即标记 is_sensitive（纯识别结果，
+    // 与「掩码敏感内容」开关无关）。实际预览是否遮挡在「读取时」按当前开关实时计算
+    // （见 db.rs `mask_sensitive_read`），使开关切换对所有（含历史）条目立即生效。
+    // 此处（刚捕获、尚未加密存储）也按当前开关计算 preview，保证新条目即时生效。
+    // 原文仍加密存储，复制不受影响。
+    let is_sensitive = matches!(
+        content_type,
+        ContentType::Text | ContentType::Link | ContentType::Code
+    ) && is_sensitive(&content_text);
+    let preview = {
+        let conn = db.conn.lock().unwrap();
+        let mask_on = db::get_string_setting(&conn, "mask_sensitive", "0") != "0";
+        if mask_on && is_sensitive {
+            SENSITIVE_MASK.to_string()
+        } else {
+            content_text.clone()
+        }
+    };
+
     let hash = content_hash(&raw);
+
+    // P1a：按「保存历史记录类型」设置过滤；禁用类型不捕获。
+    // 决策：不提供「一键清理已禁用类型历史」按钮，仅控制后续是否继续捕获。
+    {
+        let conn = db.conn.lock().unwrap();
+        if !db::save_type_enabled(&conn, content_type) {
+            println!("[clipstack] capture skipped by save-type filter: {content_type:?}");
+            return None;
+        }
+    }
 
     // 会话内去重：同一 hash 在窗口内再次出现 → 跳过广播与落库。
     let now = Instant::now();
@@ -157,15 +206,19 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         size_bytes: size as i64,
         hash: format!("{hash:016x}"),
         created_at: timestamp,
+        is_sensitive,
     };
 
     let (id, is_pinned, is_favorite) = {
         let conn = db.conn.lock().unwrap();
-        match db::insert_or_bump(&conn, &new) {
+        // 内部数据库密钥常驻内存（db.key），直接用于加密存储。
+        let key_guard = db.key.lock().unwrap();
+        let eff: Option<&Key> = key_guard.as_ref();
+        match db::insert_or_bump(&conn, eff, &new) {
             Ok(id) => {
                 // 复用内容（bump）或新增后，读回该行的真实置顶 / 收藏状态，
                 // 避免把用户设置的 is_pinned/is_favorite 覆盖为 false（否则置顶会被后台重新捕获悄悄取消）。
-                let item = db::get_item(&conn, id).ok();
+                let item = db::get_item(&conn, key_guard.as_ref(), id).ok();
                 let is_pinned = item.as_ref().map(|i| i.is_pinned).unwrap_or(false);
                 let is_favorite = item.as_ref().map(|i| i.is_favorite).unwrap_or(false);
                 (id, is_pinned, is_favorite)
@@ -187,6 +240,7 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         hash: new.hash,
         is_pinned,
         is_favorite,
+        is_sensitive,
         created_at: timestamp,
         deleted_at: None,
     })
@@ -434,6 +488,155 @@ fn looks_like_code(s: &str) -> bool {
         || s.contains("#include")
         || s.contains("SELECT ")
         || s.contains("</")
+}
+
+/// 字符串的 Shannon 熵（比特/字符），用于密码启发式判定。
+fn shannon_entropy(s: &str) -> f64 {
+    use std::collections::HashMap;
+    if s.is_empty() {
+        return 0.0;
+    }
+    let mut counts: HashMap<u8, usize> = HashMap::new();
+    for b in s.bytes() {
+        *counts.entry(b).or_insert(0) += 1;
+    }
+    let n = s.len() as f64;
+    -counts
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n;
+            p * p.log2()
+        })
+        .sum::<f64>()
+}
+
+/// Luhn 校验（卡号合法性）。传入已去除空格 / 连字符的纯数字串。
+fn luhn_valid(digits: &str) -> bool {
+    let ds: Vec<u8> = digits
+        .as_bytes()
+        .iter()
+        .map(|&b| b - b'0')
+        .collect();
+    if ds.len() < 13 || ds.len() > 19 {
+        return false;
+    }
+    let mut sum = 0u32;
+    let mut alt = false;
+    for &d in ds.iter().rev() {
+        let mut n = d as u32;
+        if alt {
+            n *= 2;
+            if n > 9 {
+                n -= 9;
+            }
+        }
+        sum += n;
+        alt = !alt;
+    }
+    sum % 10 == 0
+}
+
+/// 启发式识别常见密钥 / Token（不依赖正则依赖，手工匹配主要形态）：
+/// - `sk-` + ≥20 位字母数字（OpenAI 等）
+/// - `ghp_` + 36 位字母数字（GitHub PAT）
+/// - `AKIA` + 16 位大写字母数字（AWS Access Key）
+/// - `xox[baprs]-` + 字母数字 / 连字符（Slack Token）
+/// - `eyJ…` 开头、含 ≥2 个 `.`、整体 base64url（JWT）
+fn looks_like_token(s: &str) -> bool {
+    if s.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+    let alnum = |r: &str| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric());
+    let alnum_dash = |r: &str| {
+        !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    };
+
+    if let Some(rest) = s.strip_prefix("sk-") {
+        if rest.len() >= 20 && alnum(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("ghp_") {
+        if rest.len() == 36 && alnum(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("AKIA") {
+        if rest.len() == 16 && alnum(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("xox") {
+        if let Some(rest2) = rest.strip_prefix(['b', 'a', 'p', 'r', 's']) {
+            if let Some(rest3) = rest2.strip_prefix('-') {
+                if alnum_dash(rest3) {
+                    return true;
+                }
+            }
+        }
+    }
+    if s.starts_with("eyJ") {
+        let parts: Vec<&str> = s.split('.').collect();
+        if parts.len() >= 2
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// 密码启发式：长度 ≥ 12、无空白、含 ≥3 种字符类（小写/大写/数字/符号），且经验熵 > 3.0。
+/// 要求「多字符类」可排除仅含单一字符类的长单词（如长英文单词），避免误判正文；
+/// 经验熵兜底确保即便混合了字符类，也需具备足够随机性才判定为密码。
+fn is_strong_password(t: &str) -> bool {
+    if t.len() < 12 || t.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+    let mut classes = 0u8;
+    if t.chars().any(|c| c.is_ascii_lowercase()) {
+        classes |= 1;
+    }
+    if t.chars().any(|c| c.is_ascii_uppercase()) {
+        classes |= 2;
+    }
+    if t.chars().any(|c| c.is_ascii_digit()) {
+        classes |= 4;
+    }
+    if t.chars().any(|c| !c.is_ascii_alphanumeric()) {
+        classes |= 8;
+    }
+    classes.count_ones() >= 3 && shannon_entropy(t) > 3.0
+}
+
+/// 敏感内容识别：命中以下任一规则即视为敏感（启用掩码时预览被遮挡，原文仍加密存储）。
+/// - 常见 Token / 密钥形态；
+/// - 整段为纯数字（允许空格/连字符分隔）且通过 Luhn 校验（银行卡号，长度 13–19）；
+/// - 长度 ≥ 12、无空白、含 ≥3 种字符类且经验熵 > 3.0（高随机性密码启发式）。
+pub fn is_sensitive(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if looks_like_token(t) {
+        return true;
+    }
+    // 卡号：整段只能是数字与分隔符（空格/连字符），去分隔符后做 Luhn 校验。
+    if t.chars()
+        .all(|c| c.is_ascii_digit() || c == ' ' || c == '-')
+    {
+        let cleaned: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
+        if luhn_valid(&cleaned) {
+            return true;
+        }
+    }
+    // 密码启发式：长度 / 多字符类 / 熵三者兼具备。
+    if is_strong_password(t) {
+        return true;
+    }
+    false
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -988,6 +1191,66 @@ mod tests {
     fn is_link_rejects_multiline() {
         assert!(!is_link("line1\nline2"));
         assert!(is_link("https://a.b"));
+    }
+
+    #[test]
+    fn is_sensitive_detects_tokens() {
+        // OpenAI 类 sk- token（≥20 位字母数字）
+        assert!(is_sensitive(&format!("sk-{}", "a".repeat(24))));
+        // GitHub PAT
+        assert!(is_sensitive(&format!("ghp_{}", "a".repeat(36))));
+        // AWS Access Key
+        assert!(is_sensitive(&format!("AKIA{}", "A".repeat(16))));
+        // Slack token
+        assert!(is_sensitive("xoxb-1234567890-abcdefghij"));
+        // JWT（eyJ…eyJ….base64url）
+        assert!(is_sensitive("eyJhbGciOiJIUzI.eyJzdWIiOiIxMj.abc123_-def"));
+    }
+
+    #[test]
+    fn is_sensitive_rejects_plain_text() {
+        assert!(!is_sensitive("hello world"));
+        assert!(!is_sensitive("https://example.com"));
+        assert!(!is_sensitive("fn main() {\n    println!(\"hi\");\n}"));
+        assert!(!is_sensitive(""));
+    }
+
+    #[test]
+    fn is_sensitive_detects_card_numbers() {
+        // 4111 1111 1111 1111 是标准 Luhn 合法测试卡号
+        assert!(is_sensitive("4111 1111 1111 1111"));
+        assert!(is_sensitive("4111-1111-1111-1111"));
+        // 明显非法的卡号
+        assert!(!is_sensitive("0000 0000 0000 0001"));
+        assert!(!is_sensitive("1234 5678 9012 3456"));
+    }
+
+    #[test]
+    fn is_sensitive_detects_high_entropy_password() {
+        // 长度 ≥ 12、含 ≥3 种字符类、高熵 → 命中
+        assert!(is_sensitive("aB3$xZ9qLm7&Kr2P"));
+        // 长度不足 12 → 不命中
+        assert!(!is_sensitive("password123"));
+        // 含空白（长句）→ 不命中
+        assert!(!is_sensitive("hello world foo bar baz"));
+        // 单一字符类的长单词（仅小写字母）→ 不命中（避免误判正文）
+        assert!(!is_sensitive("antidisestablishmentarianism"));
+    }
+
+    #[test]
+    fn is_strong_password_requires_mixed_classes() {
+        // 仅数字（单类）→ 不命中
+        assert!(!is_strong_password("123456789012"));
+        // 小写+数字（两类）→ 不命中（需 ≥3 类）
+        assert!(!is_strong_password("abcdefghij12"));
+        // 小+大+数字（三类）→ 命中
+        assert!(is_strong_password("aBcDeF123456"));
+    }
+
+    #[test]
+    fn shannon_entropy_monotonic_with_letters() {
+        // 重复字符熵低，随机串熵高
+        assert!(shannon_entropy("aaaaaa") < shannon_entropy("aB3$xZ"));
     }
 
     #[test]

@@ -73,6 +73,19 @@ export function AllIcon({ size = 16 }: IconProps) {
   );
 }
 
+/** 主界面（窗口）：与托盘弹出菜单「主界面」图标保持一致的窗口字形（外框 + 标题栏 + 交通灯三点）。 */
+export function MainWindowIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18" />
+      <circle cx="7" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ size = 16 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

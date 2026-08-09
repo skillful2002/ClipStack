@@ -1,11 +1,13 @@
 // 回收站列表（P8·修复）：展示已删除条目，支持恢复 / 彻底删除 / 清空。
 
+import { useState } from "react";
 import { useHistory } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { TYPE_META, relativeTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import type { HistoryItem } from "../types";
 import { TypeIcon, RestoreIcon, TrashIcon } from "./icons";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export function TrashView() {
   const t = useT();
@@ -13,6 +15,8 @@ export function TrashView() {
   const selectedTrashId = useHistory((s) => s.selectedTrashId);
   const selectTrash = useHistory((s) => s.selectTrash);
   const { restore, purge, emptyTrash } = useItemActions();
+  // 清空回收站确认对话框（Tauri WebView 不支持 window.confirm，必须用自定义模态）。
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   return (
     <section className="list-pane">
@@ -26,7 +30,7 @@ export function TrashView() {
             className="trash-empty-btn"
             onClick={() => {
               if (trashItems.length === 0) return;
-              if (confirm(t("trash.confirmEmpty"))) void emptyTrash();
+              setConfirmEmpty(true);
             }}
             disabled={trashItems.length === 0}
           >
@@ -80,6 +84,21 @@ export function TrashView() {
           })
         )}
       </div>
+
+      {/* 清空回收站确认对话框 */}
+      <ConfirmDialog
+        open={confirmEmpty}
+        title={t("trash.emptyButton")}
+        message={t("trash.confirmEmpty")}
+        confirmLabel={t("trash.emptyButton")}
+        cancelLabel={t("confirm.cancel")}
+        danger
+        onConfirm={() => {
+          setConfirmEmpty(false);
+          void emptyTrash();
+        }}
+        onCancel={() => setConfirmEmpty(false)}
+      />
     </section>
   );
 }

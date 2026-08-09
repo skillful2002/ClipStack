@@ -9,6 +9,11 @@ import {
   onTrayCopied,
   getSettings,
   wasFirstRun,
+  hasMasterPassword,
+  isLocked,
+  getSystemInfo,
+  onAppLockChanged,
+  touchActivity,
 } from "./lib/tauri";
 import { useItemActions } from "./lib/actions";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
@@ -21,6 +26,8 @@ import { TrashView } from "./components/TrashView";
 import { TrashDetail } from "./components/TrashDetail";
 import { AboutView } from "./components/AboutView";
 import { HelpView } from "./components/HelpView";
+import { LockGate } from "./components/LockGate";
+import { useLock } from "./store/lock";
 import "./styles/app.css";
 
 export default function App() {
@@ -33,9 +40,11 @@ export default function App() {
   const setView = useHistory((s) => s.setView);
   const select = useHistory((s) => s.select);
   const { copy, pin, fav, del } = useItemActions();
+  const locked = useLock((s) => s.locked);
 
   // 启动：加载历史、应用已保存主题、订阅系统主题变化、订阅剪贴板变更。
   const themeUnlistenRef = useRef<() => void>(() => {});
+  const lockUnlistenRef = useRef<() => void>(() => {});
   useEffect(() => {
     void load();
     void (async () => {
@@ -50,6 +59,27 @@ export default function App() {
       } catch {
         /* 读取失败时退化为跟随系统 */
         await applyTheme("system");
+      }
+      // 锁定状态：已设主密码则按当前锁定态展示锁屏；否则正常运行（明文兼容）。
+      try {
+        const hw = await hasMasterPassword();
+        useLock.getState().setHasPassword(hw);
+        if (hw) {
+          const lk = await isLocked();
+          useLock.getState().setLocked(lk);
+        }
+        const info = await getSystemInfo();
+        useLock.getState().setPlatform(info.platform);
+      } catch {
+        /* 锁定状态读取失败时不阻塞启动 */
+      }
+      // 订阅后端自动锁事件（失焦 / 闲置触发），锁定态由 LockGate 展示。
+      try {
+        lockUnlistenRef.current = await onAppLockChanged((l) => {
+          if (l) useLock.getState().setLocked(true);
+        });
+      } catch {
+        /* 不支持时静默 */
       }
       // 订阅系统主题变化：仅在「跟随系统」时实时跟随 OS 切换。
       try {
@@ -69,6 +99,7 @@ export default function App() {
     const unlisten = onClipboardChanged((item) => prepend(item));
     return () => {
       void unlisten.then((fn) => fn());
+      void lockUnlistenRef.current();
       themeUnlistenRef.current();
     };
   }, [load, prepend]);
@@ -177,6 +208,24 @@ export default function App() {
     void emit("language-changed", resolved).catch(() => {});
   }, [lang]);
 
+  // 闲置计时心跳：用户与界面交互（点击 / 按键）时重置后端「闲置自动锁定」计时，
+  // 避免活跃使用期间被误锁。做了 15s 限流，降低 IPC 频率。
+  useEffect(() => {
+    let last = 0;
+    const bump = () => {
+      const now = Date.now();
+      if (now - last < 15000) return;
+      last = now;
+      void touchActivity().catch(() => {});
+    };
+    window.addEventListener("pointerdown", bump);
+    window.addEventListener("keydown", bump);
+    return () => {
+      window.removeEventListener("pointerdown", bump);
+      window.removeEventListener("keydown", bump);
+    };
+  }, []);
+
   // 提示自动消失。
   useEffect(() => {
     if (!toast) return;
@@ -205,6 +254,7 @@ export default function App() {
         )}
       </main>
       {toast && <div className="toast">{toast}</div>}
+      {locked && <LockGate />}
     </div>
   );
 }

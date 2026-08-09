@@ -120,6 +120,11 @@ export function DetailPanel() {
               </div>
             ))}
           </div>
+        ) : item.isSensitive ? (
+          <div className="preview-text sensitive-masked">
+            {item.preview}
+            <span className="sensitive-note">{t("detail.sensitiveMasked")}</span>
+          </div>
         ) : (
           <div className={`preview-text${isCode ? " code" : ""}`}>{item.contentText}</div>
         )}

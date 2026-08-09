@@ -50,15 +50,27 @@ impl Default for MenuLang {
     }
 }
 
-/// 托盘菜单「打开主界面」标签。
+/// 托盘菜单「主界面」标签。
 pub fn tray_open_main(lang: Lang) -> &'static str {
     match lang {
-        Lang::ZhCn => "打开主界面",
-        Lang::ZhTw => "開啟主介面",
-        Lang::En => "Open Main Window",
-        Lang::Ja => "メインウィンドウを開く",
-        Lang::De => "Hauptfenster öffnen",
-        Lang::Fr => "Ouvrir la fenêtre",
+        Lang::ZhCn => "主界面",
+        Lang::ZhTw => "主介面",
+        Lang::En => "Main Window",
+        Lang::Ja => "メインウィンドウ",
+        Lang::De => "Hauptfenster",
+        Lang::Fr => "Fenêtre principale",
+    }
+}
+
+/// 托盘菜单「锁定」标签（仅在已设主密码且当前未锁定时显示）。
+pub fn tray_lock(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "锁定",
+        Lang::ZhTw => "鎖定",
+        Lang::En => "Lock",
+        Lang::Ja => "ロック",
+        Lang::De => "Sperren",
+        Lang::Fr => "Verrouiller",
     }
 }
 
@@ -107,6 +119,18 @@ pub fn tray_quit(lang: Lang) -> &'static str {
         Lang::Ja => "ClipStack を終了",
         Lang::De => "ClipStack beenden",
         Lang::Fr => "Quitter ClipStack",
+    }
+}
+
+/// 托盘菜单「已锁定」占位项（主密码已设置且当前处于锁定态时显示，点击解锁）。
+pub fn tray_locked(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "🔒 已锁定（点击解锁）",
+        Lang::ZhTw => "🔒 已鎖定（點擊解鎖）",
+        Lang::En => "🔒 Locked (click to unlock)",
+        Lang::Ja => "🔒 ロック中（クリックで解除）",
+        Lang::De => "🔒 Gesperrt (zum Entsperren klicken)",
+        Lang::Fr => "🔒 Verrouillé (cliquez pour déverrouiller)",
     }
 }
 

@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
-use crate::i18n::{tray_about, tray_empty, tray_help, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::AppState;
+use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
 use crate::models::ContentType;
 use crate::set_dock_visible;
 
@@ -27,6 +28,7 @@ pub fn build_tray(
     app: &AppHandle,
     db: &DbState,
     monitor: &Arc<Mutex<MonitorState>>,
+    state: &AppState,
 ) -> Result<TrayIcon, Box<dyn std::error::Error>> {
     // 托盘图标：macOS 使用单色模板图标以自动适配明暗菜单栏；
     // Windows / Linux 使用彩色图标。
@@ -36,16 +38,17 @@ pub fn build_tray(
     #[cfg(not(target_os = "macos"))]
     let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
         .expect("failed to load tray icon");
-    let menu = build_menu(app, db)?;
+    let menu = build_menu(app, db, state)?;
     let db_for_event = db.clone();
     let monitor_for_event = monitor.clone();
+    let state_for_event = state.clone();
     let tray = TrayIconBuilder::with_id("clipstack-tray")
         .icon(icon)
         .tooltip("ClipStack")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {
-            handle_menu_event(app, event, &db_for_event, &monitor_for_event)
+            handle_menu_event(app, event, &db_for_event, &monitor_for_event, &state_for_event)
         })
         .build(app)?;
 
@@ -57,8 +60,8 @@ pub fn build_tray(
 }
 
 /// 重建托盘菜单（最近历史 + 固定项）。捕获到新内容时调用。
-pub fn refresh_menu(tray: &TrayIcon, app: &AppHandle, db: &DbState) {
-    if let Ok(menu) = build_menu(app, db) {
+pub fn refresh_menu(tray: &TrayIcon, app: &AppHandle, db: &DbState, state: &AppState) {
+    if let Ok(menu) = build_menu(app, db, state) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -66,11 +69,22 @@ pub fn refresh_menu(tray: &TrayIcon, app: &AppHandle, db: &DbState) {
 fn build_menu(
     app: &AppHandle,
     db: &DbState,
+    state: &AppState,
 ) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
+    // 锁定顺序与捕获线程一致：先 key 后 conn，避免死锁。
+    let key_guard = db.key.lock().expect("key lock poisoned");
     let conn = db.conn.lock().expect("db lock poisoned");
+    // 锁定态（已设主密码且当前锁定）：不展示任何历史明文/密文。
+    let locked = state.is_locked() && db::has_master_password(&conn);
+    // 是否已设主密码（用于决定是否显示「锁定」菜单——仅解锁态且已设密码时显示）。
+    let has_pw = db::has_master_password(&conn);
     let limit = db::get_int_setting(&conn, TRAY_HISTORY_KEY, DEFAULT_TRAY_HISTORY);
-    let recent = db::get_recent_tray(&conn, limit)?;
+    let recent = if locked {
+        Vec::new()
+    } else {
+        db::get_recent_tray(&conn, key_guard.as_ref(), limit)?
+    };
     // 解析菜单语言：显式选择具体语言时从设置直接取值（首帧即正确）；
     // system/未知则使用前端推送的已解析语言（MenuLang 状态，缺省英文）。
     let setting = db::get_string_setting(&conn, "language", "system");
@@ -79,8 +93,13 @@ fn build_menu(
         *app.state::<MenuLang>().0.lock().expect("menu lang lock poisoned"),
     );
     drop(conn);
+    drop(key_guard);
 
-    if recent.is_empty() {
+    if locked {
+        // 锁定态：仅给一个「点击解锁」占位项，绝不泄露明文或密文。
+        let item = MenuItem::with_id(app, "unlock", tray_locked(lang), true, None::<&str>)?;
+        menu.append(&item)?;
+    } else if recent.is_empty() {
         let empty = MenuItem::with_id(app, "empty", tray_empty(lang), false, None::<&str>)?;
         menu.append(&empty)?;
     } else {
@@ -104,6 +123,7 @@ fn build_menu(
     let settings_icon = Image::from_bytes(include_bytes!("../icons/menu-settings.png"))?;
     let about_icon = Image::from_bytes(include_bytes!("../icons/menu-about.png"))?;
     let help_icon = Image::from_bytes(include_bytes!("../icons/menu-help.png"))?;
+    let lock_icon = Image::from_bytes(include_bytes!("../icons/menu-lock.png"))?;
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(
@@ -118,6 +138,14 @@ fn build_menu(
             .accelerator("CmdOrCtrl+,")
             .build(app)?,
     )?;
+    // 已设主密码时在「设置」下追加「锁定」菜单项（仅解锁态显示，锁定态 history 区已有占位项）。
+    if has_pw && !locked {
+        menu.append(
+            &IconMenuItemBuilder::with_id("tray_lock", tray_lock(lang))
+                .icon(lock_icon)
+                .build(app)?,
+        )?;
+    }
     // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
@@ -143,25 +171,39 @@ fn handle_menu_event(
     event: tauri::menu::MenuEvent,
     db: &DbState,
     monitor: &Arc<Mutex<MonitorState>>,
+    state: &AppState,
 ) {
     let id = event.id().as_ref().to_string();
     if let Some(rest) = id.strip_prefix("copy:") {
         if let Ok(id_num) = rest.parse::<i64>() {
-            let conn = db.conn.lock().expect("db lock poisoned");
-            if let Ok(item) = db::get_item(&conn, id_num) {
-                drop(conn);
+            // 锁定态不允许从托盘复制（此时历史项已被「已锁定」项替换，正常不会走到这里）。
+            if state.is_locked() {
+                return;
+            }
+            // 取密钥用于解密（key=None 时透传明文，兼容未启用安全）。
+            // 锁顺序与 build_menu / 捕获线程一致：先 key 后 conn。
+            let key_guard = db.key.lock().expect("key lock poisoned");
+            let (item, blob) = {
+                let conn = db.conn.lock().expect("db lock poisoned");
+                let item = db::get_item(&conn, key_guard.as_ref(), id_num).ok();
+                let blob: Option<Vec<u8>> = item.as_ref().and_then(|it| {
+                    if matches!(it.content_type, ContentType::Image | ContentType::File) {
+                        conn.query_row(
+                            "SELECT content_blob FROM history WHERE id = ?",
+                            [id_num],
+                            |r| r.get(0),
+                        )
+                        .ok()
+                    } else {
+                        None
+                    }
+                });
+                (item, blob)
+            };
+            drop(key_guard);
+            if let Some(item) = item {
                 match item.content_type {
-                    crate::models::ContentType::Image => {
-                        // 图片：从数据库读取 PNG 二进制，解码后写回剪贴板。
-                        let conn2 = db.conn.lock().expect("db lock poisoned");
-                        let blob: Option<Vec<u8>> = conn2
-                            .query_row(
-                                "SELECT content_blob FROM history WHERE id = ?",
-                                [id_num],
-                                |r| r.get(0),
-                            )
-                            .ok();
-                        drop(conn2);
+                    ContentType::Image => {
                         if let Some(png_bytes) = blob {
                             crate::clipboard::note_self_copy_image(monitor, &png_bytes);
                             match crate::clipboard::set_clipboard_image(&png_bytes) {
@@ -172,17 +214,7 @@ fn handle_menu_event(
                             }
                         }
                     }
-                    crate::models::ContentType::File => {
-                        // 文件：从数据库读取路径列表（JSON），写回剪贴板文件列表。
-                        let conn2 = db.conn.lock().expect("db lock poisoned");
-                        let blob: Option<Vec<u8>> = conn2
-                            .query_row(
-                                "SELECT content_blob FROM history WHERE id = ?",
-                                [id_num],
-                                |r| r.get(0),
-                            )
-                            .ok();
-                        drop(conn2);
+                    ContentType::File => {
                         let paths = crate::commands::paths_from_storage(blob.as_deref(), &item.content_text);
                         crate::clipboard::note_self_copy_files(monitor, &paths);
                         match crate::clipboard::set_clipboard_file_list(&paths) {
@@ -208,6 +240,15 @@ fn handle_menu_event(
         return;
     }
     match id.as_str() {
+        "unlock" => {
+            // 锁定态占位项被点击：打开主界面，前端据此展示锁屏让用户解锁。
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            set_dock_visible(app);
+            let _ = app.emit("show-view", "settings");
+        }
         "open_main" => {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -240,6 +281,11 @@ fn handle_menu_event(
             }
             set_dock_visible(app);
             let _ = app.emit("show-view", "about");
+        }
+        "tray_lock" => {
+            // 托盘「锁定」菜单：立即锁定应用。
+            state.set_locked(true);
+            let _ = app.emit("refresh-tray", ());
         }
         _ => {}
     }

@@ -19,6 +19,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 arboard = "3"            # 跨平台剪贴板读写（P1 捕获引擎：get_text/get_image/get_file）
 rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 持久化（P2）
+aes-gcm = "0.10"         # P0 内容加密 AES-256-GCM
+argon2 = "0.5"           # P0 主密码 → 密钥派生 / 校验
+zeroize = { version = "1", features = ["derive"] }  # P0 密钥内存清零
+base64 = "0.22"          # P0 content_text 密文 base64 存储
+rand = "0.8"             # P0 加密随机 nonce
 png = "0.17"                        # 图片预览：把 arboard 原始 RGBA 像素编码为 PNG 存储（P8）
 image = "0.25"                       # 把截图软件写入的 BMP/CF_BITMAP/CF_DIB 解码为 RGBA（Windows 图片捕获补全）
 clipboard-win = "5"                  # 直接读 arboard 3.x 未覆盖的 CF_BITMAP / CF_DIB 剪贴板图片格式（Windows）
@@ -29,7 +34,9 @@ tauri-plugin-autostart = "2"        # P6 开机自启开关
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSWorkspace", "NSRunningApplication"] }
-objc2-foundation = { version = "0.3", features = ["NSString"] }
+security-framework = "2"          # 内部数据库加密密钥的钥匙串持久化（clipstack.enc，无生物识别保护）
+security-framework-sys = "2"      # 提供 kSec* 常量与 SecItemAdd 等底层符号（与 security-framework 同主版本）
+core-foundation = "0.9"           # security-framework 的 CF 对象类型（CFDictionary/CFData/CFString 等）
 
 [profile.release]
 codegen-units = 1

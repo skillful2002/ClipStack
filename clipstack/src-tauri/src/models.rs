@@ -58,6 +58,8 @@ pub struct HistoryItem {
     pub hash: String,
     pub is_pinned: bool,
     pub is_favorite: bool,
+    /// 是否命中敏感内容识别（启用掩码时预览被遮挡，原文仍加密存储）。
+    pub is_sensitive: bool,
     /// 毫秒时间戳。
     pub created_at: i64,
     /// 删除时间（仅回收站条目有值；主列表为 None，以便同一结构体复用）。
@@ -77,6 +79,8 @@ pub struct NewItem {
     pub size_bytes: i64,
     pub hash: String,
     pub created_at: i64,
+    /// 是否命中敏感内容识别（写库时由捕获线程计算）。
+    pub is_sensitive: bool,
 }
 
 /// 设置项（key / value 均为字符串，前端 / 后端自行解释）。

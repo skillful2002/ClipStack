@@ -87,6 +87,23 @@ def draw_help():
     return img
 
 
+def draw_lock():
+    """锁定（锁）：顶部锁梁拱 + 锁体方框 + 锁孔，与窗口 / 齿轮风格一致的中性灰描边。"""
+    img = new_canvas()
+    d = ImageDraw.Draw(img)
+    cx = SS / 2
+    # 锁体方框（圆角矩形）
+    x0, y0, x1, y1 = 16, 34, 48, 56
+    d.rounded_rectangle([x0, y0, x1, y1], radius=5, outline=GRAY, width=5)
+    # 锁梁拱（锁体上方的上半圆），底点落在锁体顶边两侧。
+    d.arc([cx - 12, y0 - 12, cx + 12, y0], start=180, end=360, fill=GRAY, width=5)
+    # 锁孔：上方小圆 + 向下短竖线，构成经典挂锁锁孔。
+    hx, hy = cx, (y0 + y1) / 2 + 1
+    d.ellipse([hx - 3, hy - 6, hx + 3, hy], fill=GRAY)
+    d.line([hx, hy, hx, y1 - 5], fill=GRAY, width=4)
+    return img
+
+
 def save(img, name):
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
     out = f"{name}.png"
@@ -99,3 +116,4 @@ if __name__ == "__main__":
     save(draw_gear(), "menu-settings")
     save(draw_info(), "menu-about")
     save(draw_help(), "menu-help")
+    save(draw_lock(), "menu-lock")

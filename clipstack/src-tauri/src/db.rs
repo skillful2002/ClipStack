@@ -7,10 +7,43 @@
 
 use std::sync::{Mutex, MutexGuard};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rusqlite::{params, Connection};
 use tauri::{AppHandle, Manager};
 
-use crate::models::{HistoryItem, NewItem, Setting};
+use crate::clipboard::is_sensitive;
+use crate::crypto::{self, Key};
+use crate::models::{ContentType, HistoryItem, NewItem, Setting};
+
+/// 敏感内容被掩码时展示的占位符（与托盘脱敏占位一致）。
+pub const SENSITIVE_MASK: &str = "••••••";
+
+/// 读取时按当前 `mask_sensitive` 设置实时计算敏感掩码。
+///
+/// 关键设计：掩码判定在「读取时」而非「写入时」进行，使「掩码敏感内容」开关切换对
+/// **所有（含历史）条目立即生效**，无需等待重新捕获或迁移旧数据。原文仍解密返回
+/// （复制不受影响），仅预览被遮挡。
+/// 返回 `(原文, 预览, 是否掩码)`。
+fn mask_sensitive_read(
+    key: Option<&Key>,
+    content_type: ContentType,
+    raw: &str,
+    mask_on: bool,
+) -> (String, String, bool) {
+    let plain = open_text(key, raw);
+    let sensitive = mask_on
+        && matches!(
+            content_type,
+            ContentType::Text | ContentType::Link | ContentType::Code
+        )
+        && is_sensitive(&plain);
+    let preview = if sensitive {
+        SENSITIVE_MASK.to_string()
+    } else {
+        plain.clone()
+    };
+    (plain, preview, sensitive)
+}
 
 /// 历史条目容量上限：超出后自动硬删最旧部分（不进回收站，避免回收站无限增长）。
 pub const MAX_HISTORY: i64 = 5000;
@@ -20,6 +53,9 @@ pub const DEFAULT_LIMIT: i64 = 500;
 /// 受 Tauri 托管的数据库连接。
 pub struct AppDb {
     pub conn: Mutex<Connection>,
+    /// 主密钥（仅解锁后在内存中持有；锁定时清空）。`None` 表示未解锁 / 尚未设置主密码
+    /// （此时落库为明文，兼容「尚未启用安全」与「锁定态跳过捕获」）。
+    pub key: Mutex<Option<Key>>,
 }
 
 /// Tauri State 类型（Arc 便于在监控线程间共享）。
@@ -29,6 +65,47 @@ impl AppDb {
     /// 锁定并返回连接（封装，避免调用处重复 map_err）。
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().expect("db lock poisoned")
+    }
+}
+
+// ===== P0 内容加解密辅助（仅 content_text / content_blob 两列）=====
+//
+// `key = None` 时透传明文（兼容尚未启用安全 / 迁移前数据），使单测与旧数据路径零改动。
+
+/// 明文字符串 → 密文（base64 存 TEXT 列）。
+fn seal_text(key: Option<&Key>, s: &str) -> String {
+    match key {
+        Some(k) => STANDARD.encode(crypto::encrypt(k, s.as_bytes())),
+        None => s.to_string(),
+    }
+}
+
+/// 明文二进制 → 密文（原始字节存 BLOB 列）。
+fn seal_blob(key: Option<&Key>, b: Option<&[u8]>) -> Option<Vec<u8>> {
+    match (key, b) {
+        (Some(k), Some(b)) => Some(crypto::encrypt(k, b)),
+        _ => b.map(|b| b.to_vec()),
+    }
+}
+
+/// 密文（base64 TEXT 列）→ 明文；非 base64 / 解密失败（明文遗留）则原样返回。
+fn open_text(key: Option<&Key>, s: &str) -> String {
+    match key {
+        Some(k) => match STANDARD.decode(s) {
+            Ok(ct) => crypto::decrypt(k, &ct)
+                .map(|p| String::from_utf8_lossy(&p).into_owned())
+                .unwrap_or_else(|| s.to_string()),
+            Err(_) => s.to_string(),
+        },
+        None => s.to_string(),
+    }
+}
+
+/// 密文（BLOB 列）→ 明文二进制；非密文遗留则原样返回。
+fn open_blob(key: Option<&Key>, b: Option<&[u8]>) -> Option<Vec<u8>> {
+    match (key, b) {
+        (Some(k), Some(b)) => crypto::decrypt(k, b),
+        _ => b.map(|b| b.to_vec()),
     }
 }
 
@@ -46,11 +123,32 @@ pub fn open(app: &AppHandle) -> Result<AppDb, Box<dyn std::error::Error>> {
     let _ = migrate_files_from_text(&conn);
     Ok(AppDb {
         conn: Mutex::new(conn),
+        key: Mutex::new(None),
     })
+}
+
+/// 若表 `t` 尚不存在列 `col`，则追加（幂等，兼容已部署旧库升级）。
+/// SQLite 不支持 `ADD COLUMN IF NOT EXISTS`，这里先查 `pragma_table_info` 再决定。
+fn add_column_if_missing(conn: &Connection, t: &str, col: &str, def: &str) -> rusqlite::Result<()> {
+    let exists: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM pragma_table_info('{t}') WHERE name = '{col}'"),
+        [],
+        |r| r.get(0),
+    )?;
+    if exists == 0 {
+        conn.execute(
+            &format!("ALTER TABLE {t} ADD COLUMN {col} {def}"),
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 /// 建表 + 索引（幂等）。
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // P2 · 安全删除：DELETE 时立即用零覆写被删页（防止内容残留在空闲页）。
+    conn.execute_batch("PRAGMA secure_delete = ON;")?;
+
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS history (
@@ -63,6 +161,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             hash         TEXT    NOT NULL,
             is_pinned    INTEGER NOT NULL DEFAULT 0,
             is_favorite  INTEGER NOT NULL DEFAULT 0,
+            is_sensitive INTEGER NOT NULL DEFAULT 0,
             created_at   INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at);
@@ -79,6 +178,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             hash         TEXT    NOT NULL,
             is_pinned    INTEGER NOT NULL DEFAULT 0,
             is_favorite  INTEGER NOT NULL DEFAULT 0,
+            is_sensitive INTEGER NOT NULL DEFAULT 0,
             created_at   INTEGER NOT NULL,
             deleted_at   INTEGER NOT NULL
         );
@@ -93,12 +193,24 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             name TEXT NOT NULL UNIQUE
         );
         "#,
-    )
+    )?;
+
+    // P1-验收 · 兼容已部署旧库：旧表可能不含 `is_sensitive` 列，这里幂等补列。
+    // 全新库因上方 CREATE TABLE 已含该列，此处为 no-op。
+    add_column_if_missing(conn, "history", "is_sensitive", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(conn, "trash", "is_sensitive", "INTEGER NOT NULL DEFAULT 0")?;
+    Ok(())
 }
 
 /// 新增或去重置顶：同 hash 已在 history 中 → 更新 created_at 等并置顶返回原 id；
 /// 否则插入新行。插入后执行容量上限清理。返回行 id。
-pub fn insert_or_bump(conn: &Connection, item: &NewItem) -> rusqlite::Result<i64> {
+pub fn insert_or_bump(
+    conn: &Connection,
+    key: Option<&Key>,
+    item: &NewItem,
+) -> rusqlite::Result<i64> {
+    let ct = seal_text(key, &item.content_text);
+    let cb = seal_blob(key, item.content_blob.as_deref());
     if let Ok(existing) =
         conn.query_row("SELECT id FROM history WHERE hash = ?", [item.hash.as_str()], |r| {
             r.get::<_, i64>(0)
@@ -108,8 +220,8 @@ pub fn insert_or_bump(conn: &Connection, item: &NewItem) -> rusqlite::Result<i64
             "UPDATE history SET created_at = ?, content_text = ?, content_blob = ?, size_bytes = ?, source_app = ? WHERE id = ?",
             params![
                 item.created_at,
-                item.content_text,
-                item.content_blob,
+                ct,
+                cb,
                 item.size_bytes,
                 item.source_app,
                 existing
@@ -120,15 +232,16 @@ pub fn insert_or_bump(conn: &Connection, item: &NewItem) -> rusqlite::Result<i64
     }
 
     conn.execute(
-        "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)",
+        "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
         params![
             item.content_type.as_str(),
-            item.content_text,
-            item.content_blob,
+            ct,
+            cb,
             item.source_app,
             item.size_bytes,
             item.hash,
+            item.is_sensitive as i64,
             item.created_at
         ],
     )?;
@@ -138,29 +251,40 @@ pub fn insert_or_bump(conn: &Connection, item: &NewItem) -> rusqlite::Result<i64
 }
 
 /// 读取历史：默认按「置顶优先、再按时间倒序」，限制条数。
-pub fn get_history(conn: &Connection, limit: i64, pin_first: bool) -> rusqlite::Result<Vec<HistoryItem>> {
+pub fn get_history(
+    conn: &Connection,
+    key: Option<&Key>,
+    limit: i64,
+    pin_first: bool,
+) -> rusqlite::Result<Vec<HistoryItem>> {
     let order = if pin_first {
         "is_pinned DESC, created_at DESC"
     } else {
         "created_at DESC"
     };
     let sql = format!(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
          FROM history ORDER BY {order} LIMIT ?"
     );
+    // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
+    let mask_on = get_string_setting(conn, "mask_sensitive", "0") != "0";
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([limit], |r| {
+        let raw: String = r.get(2)?;
+        let ct = parse_content_type(r.get::<_, String>(1)?);
+        let (plain, preview, sensitive) = mask_sensitive_read(key, ct, &raw, mask_on);
         Ok(HistoryItem {
             id: r.get(0)?,
-            content_type: parse_content_type(r.get::<_, String>(1)?),
-            content_text: r.get(2)?,
-            preview: r.get::<_, String>(2)?,
+            content_type: ct,
+            content_text: plain,
+            preview,
             source_app: r.get(3)?,
             size_bytes: r.get(4)?,
             hash: r.get(5)?,
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
-            created_at: r.get(8)?,
+            is_sensitive: sensitive,
+            created_at: r.get(9)?,
             deleted_at: None,
         })
     })?;
@@ -169,23 +293,33 @@ pub fn get_history(conn: &Connection, limit: i64, pin_first: bool) -> rusqlite::
 
 /// 托盘菜单专用：读取最近若干条，但排除「文件」类型（文件复制在文件管理器中粘贴更直观，
 /// 不适合在托盘里以文本/图标形式展示复制）。
-pub fn get_recent_tray(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<HistoryItem>> {
+pub fn get_recent_tray(
+    conn: &Connection,
+    key: Option<&Key>,
+    limit: i64,
+) -> rusqlite::Result<Vec<HistoryItem>> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
          FROM history WHERE content_type != 'file' ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
     )?;
+    // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
+    let mask_on = get_string_setting(conn, "mask_sensitive", "0") != "0";
     let rows = stmt.query_map([limit], |r| {
+        let raw: String = r.get(2)?;
+        let ct = parse_content_type(r.get::<_, String>(1)?);
+        let (plain, preview, sensitive) = mask_sensitive_read(key, ct, &raw, mask_on);
         Ok(HistoryItem {
             id: r.get(0)?,
-            content_type: parse_content_type(r.get::<_, String>(1)?),
-            content_text: r.get(2)?,
-            preview: r.get::<_, String>(2)?,
+            content_type: ct,
+            content_text: plain,
+            preview,
             source_app: r.get(3)?,
             size_bytes: r.get(4)?,
             hash: r.get(5)?,
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
-            created_at: r.get(8)?,
+            is_sensitive: sensitive,
+            created_at: r.get(9)?,
             deleted_at: None,
         })
     })?;
@@ -193,23 +327,29 @@ pub fn get_recent_tray(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Hi
 }
 
 /// 按 id 读取单条历史（托盘点击复制、命令读取原文等场景）。
-pub fn get_item(conn: &Connection, id: i64) -> rusqlite::Result<HistoryItem> {
+pub fn get_item(conn: &Connection, key: Option<&Key>, id: i64) -> rusqlite::Result<HistoryItem> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
          FROM history WHERE id = ?",
     )?;
+    // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
+    let mask_on = get_string_setting(conn, "mask_sensitive", "0") != "0";
     stmt.query_row([id], |r| {
+        let raw: String = r.get(2)?;
+        let ct = parse_content_type(r.get::<_, String>(1)?);
+        let (plain, preview, sensitive) = mask_sensitive_read(key, ct, &raw, mask_on);
         Ok(HistoryItem {
             id: r.get(0)?,
-            content_type: parse_content_type(r.get::<_, String>(1)?),
-            content_text: r.get(2)?,
-            preview: r.get::<_, String>(2)?,
+            content_type: ct,
+            content_text: plain,
+            preview,
             source_app: r.get(3)?,
             size_bytes: r.get(4)?,
             hash: r.get(5)?,
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
-            created_at: r.get(8)?,
+            is_sensitive: sensitive,
+            created_at: r.get(9)?,
             deleted_at: None,
         })
     })
@@ -220,8 +360,8 @@ pub fn delete_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     let deleted_at = now_ms();
     tx.execute(
-        "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at) \
-         SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ? \
+        "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
+         SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
          FROM history WHERE id = ?",
         params![deleted_at, id],
     )?;
@@ -240,8 +380,8 @@ pub fn delete_items(conn: &mut Connection, ids: &[i64]) -> rusqlite::Result<usiz
     let tx = conn.transaction()?;
     for &id in ids {
         tx.execute(
-            "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at) \
-             SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ? \
+            "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
+             SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
              FROM history WHERE id = ?",
             params![deleted_at, id],
         )?;
@@ -250,22 +390,28 @@ pub fn delete_items(conn: &mut Connection, ids: &[i64]) -> rusqlite::Result<usiz
     tx.commit()?;
     Ok(ids.len())
 }
-pub fn get_trash(conn: &Connection) -> rusqlite::Result<Vec<HistoryItem>> {
+pub fn get_trash(conn: &Connection, key: Option<&Key>) -> rusqlite::Result<Vec<HistoryItem>> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive \
          FROM trash ORDER BY deleted_at DESC",
     )?;
+    // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
+    let mask_on = get_string_setting(conn, "mask_sensitive", "0") != "0";
     let rows = stmt.query_map([], |r| {
+        let raw: String = r.get(2)?;
+        let ct = parse_content_type(r.get::<_, String>(1)?);
+        let (plain, preview, sensitive) = mask_sensitive_read(key, ct, &raw, mask_on);
         Ok(HistoryItem {
             id: r.get(0)?,
-            content_type: parse_content_type(r.get::<_, String>(1)?),
-            content_text: r.get(2)?,
-            preview: r.get::<_, String>(2)?,
+            content_type: ct,
+            content_text: plain,
+            preview,
             source_app: r.get(3)?,
             size_bytes: r.get(4)?,
             hash: r.get(5)?,
             is_pinned: r.get::<_, i64>(6)? != 0,
             is_favorite: r.get::<_, i64>(7)? != 0,
+            is_sensitive: sensitive,
             created_at: r.get(8)?,
             deleted_at: Some(r.get(9)?),
         })
@@ -279,8 +425,8 @@ pub fn restore_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     let now = now_ms();
     tx.execute(
-        "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at) \
-         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, 0, 0, ? \
+        "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, is_sensitive) \
+         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, 0, 0, ?, is_sensitive \
          FROM trash WHERE id = ?",
         params![now, id],
     )?;
@@ -297,6 +443,8 @@ pub fn purge_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
 /// 清空回收站：删除全部。
 pub fn empty_trash(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM trash", [])?;
+    // P2 · 安全删除：回收站内容已零覆写，VACUUM 回收空闲页。
+    let _ = conn.execute("VACUUM", []);
     Ok(())
 }
 
@@ -307,13 +455,16 @@ pub fn clear_history(conn: &mut Connection) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     let deleted_at = now_ms();
     tx.execute(
-        "INSERT INTO trash (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at) \
-         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ? \
+        "INSERT INTO trash (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
+         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
          FROM history",
         params![deleted_at],
     )?;
     tx.execute("DELETE FROM history", [])?;
-    tx.commit()
+    tx.commit()?;
+    // P2 · 安全删除：清空历史后 VACUUM 回收空闲页（DELETE 已零覆写）。
+    let _ = conn.execute("VACUUM", []);
+    Ok(())
 }
 
 /// 切换置顶，返回切换后的状态（id 不存在返回 false）。
@@ -384,6 +535,159 @@ pub fn get_int_setting(conn: &Connection, key: &str, default: i64) -> i64 {
     }
 }
 
+/// 读取单条条目的（已解密）二进制与文本：供 `copy_image` / `copy_file` / `get_item_blob` 使用。
+/// 同时取 content_blob 与 content_text，按当前 key 解密；调用方无需分别加锁（本函数内统一加锁）。
+pub fn read_item_raw(db: &AppDb, id: i64, table: &str) -> Option<(Option<Vec<u8>>, String)> {
+    let conn = db.conn.lock().expect("db lock poisoned");
+    let key = db.key.lock().expect("key lock poisoned");
+    let row: (Option<Vec<u8>>, String) = conn
+        .query_row(
+            &format!("SELECT content_blob, content_text FROM {table} WHERE id = ?"),
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()?;
+    let text = open_text(key.as_ref(), &row.1);
+    let blob = open_blob(key.as_ref(), row.0.as_deref());
+    Some((blob, text))
+}
+
+/// 主密码是否已设置（`pw_verifier` 是否存在）。
+pub fn has_master_password(conn: &Connection) -> bool {
+    get_string_setting(conn, "pw_verifier", "") != ""
+}
+
+/// P1a · 读取「保存历史记录类型」开关：文本 / 图片 / 文件三类，默认均启用。
+/// 禁用类型在捕获阶段跳过，不写入历史（决策：不提供「一键清理已禁用类型历史」按钮，
+/// 仅控制后续是否继续捕获）。
+pub fn save_type_enabled(conn: &Connection, ct: ContentType) -> bool {
+    let key = match ct {
+        ContentType::Text | ContentType::Link | ContentType::Code => "save_text",
+        ContentType::Image => "save_image",
+        ContentType::File => "save_file",
+    };
+    get_string_setting(conn, key, "1") != "0"
+}
+
+/// 写入主密码派生所需的盐与校验哈希（首次设置主密码时调用）。
+pub fn set_master_password(conn: &Connection, salt_hex: &str, verifier: &str) -> rusqlite::Result<()> {
+    update_setting(conn, "pw_salt", salt_hex)?;
+    update_setting(conn, "pw_verifier", verifier)?;
+    Ok(())
+}
+
+/// 清除主密码：移除校验盐/哈希，重置加密迁移标志（允许未来重设主密码时重新迁移明文），
+/// 并关闭 Touch ID 设置（Touch ID 是主密码的增强，无主密码即无意义）。
+pub fn clear_master_password(conn: &Connection) -> rusqlite::Result<()> {
+    update_setting(conn, "pw_salt", "")?;
+    update_setting(conn, "pw_verifier", "")?;
+    update_setting(conn, "mig_enc_v1", "")?;
+    update_setting(conn, "use_touch_id", "0")?;
+    Ok(())
+}
+
+/// 读取主密码盐（hex）。
+pub fn get_pw_salt(conn: &Connection) -> String {
+    get_string_setting(conn, "pw_salt", "")
+}
+
+/// 读取主密码校验哈希。
+pub fn get_pw_verifier(conn: &Connection) -> String {
+    get_string_setting(conn, "pw_verifier", "")
+}
+
+/// 迁移：将存量明文 `content_text` / `content_blob` 加密（一次性，由 `mig_enc_v1` 标志保证）。
+/// 在启动阶段调用——此时内部数据库密钥已载入内存，全库明文直接全部加密；
+/// 之后写入由 `insert_or_bump` 加密。已加密行（可成功解密为不同内容）会被跳过，
+/// 避免对既有密文再次加密造成双重加密。
+pub fn migrate_plaintext_to_encrypted(conn: &Connection, key: &Key) -> rusqlite::Result<usize> {
+    if get_string_setting(conn, "mig_enc_v1", "") == "1" {
+        return Ok(0);
+    }
+    let mut n = 0;
+    for table in ["history", "trash"] {
+        let mut stmt = conn.prepare(&format!("SELECT id, content_text, content_blob FROM {table}"))?;
+        let rows: Vec<(i64, String, Option<Vec<u8>>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        for (id, text, blob) in rows {
+            // 已加密行（用内部密钥可成功解密为不同内容）跳过，避免双重加密。
+            if open_text(Some(key), &text) != text {
+                continue;
+            }
+            let enc_text = STANDARD.encode(crypto::encrypt(key, text.as_bytes()));
+            let enc_blob = blob.map(|b| crypto::encrypt(key, &b));
+            conn.execute(
+                &format!("UPDATE {table} SET content_text = ?, content_blob = ? WHERE id = ?"),
+                params![enc_text, enc_blob, id],
+            )?;
+            n += 1;
+        }
+    }
+    update_setting(conn, "mig_enc_v1", "1")?;
+    Ok(n)
+}
+
+/// 主密码变更时重新加密（历史函数，当前主密码已不再影响数据库加密，仅保留供测试/兼容）。
+#[allow(dead_code)]
+pub fn reencrypt_all(conn: &Connection, old: &Key, new: &Key) -> rusqlite::Result<usize> {
+    let mut n = 0;
+    for table in ["history", "trash"] {
+        let mut stmt = conn.prepare(&format!("SELECT id, content_text, content_blob FROM {table}"))?;
+        let rows: Vec<(i64, String, Option<Vec<u8>>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        for (id, text, blob) in rows {
+            // 解密（旧密钥）；本身为明文遗留（未迁移）则直接当明文处理。
+            let plain = match STANDARD.decode(&text) {
+                Ok(ct) => crypto::decrypt(old, &ct).unwrap_or_else(|| text.as_bytes().to_vec()),
+                Err(_) => text.into_bytes(),
+            };
+            let new_enc = STANDARD.encode(crypto::encrypt(new, &plain));
+            let new_blob = blob
+                .and_then(|b| crypto::decrypt(old, &b))
+                .map(|p| crypto::encrypt(new, &p));
+            conn.execute(
+                &format!("UPDATE {table} SET content_text = ?, content_blob = ? WHERE id = ?"),
+                params![new_enc, new_blob, id],
+            )?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// 清除主密码时：用当前密钥解密全部 `content_text` / `content_blob` 并转回明文存储
+/// （此后应用不再持有密钥）。解密失败（非本密钥加密）的内容保留原样。
+pub fn decrypt_all_to_plaintext(conn: &Connection, key: &Key) -> rusqlite::Result<usize> {
+    let mut n = 0;
+    for table in ["history", "trash"] {
+        let mut stmt = conn.prepare(&format!("SELECT id, content_text, content_blob FROM {table}"))?;
+        let rows: Vec<(i64, String, Option<Vec<u8>>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        for (id, text, blob) in rows {
+            // 解码 base64；失败说明本就是明文（未迁移遗留），原样保留。
+            let plain_bytes = match STANDARD.decode(&text) {
+                Ok(ct) => crypto::decrypt(key, &ct).unwrap_or_else(|| text.as_bytes().to_vec()),
+                Err(_) => text.into_bytes(),
+            };
+            let plain_text = String::from_utf8_lossy(&plain_bytes).to_string();
+            // 明文 blob：解密失败（非加密遗留）时保留为 NULL，避免残留密文被误当图片/文件。
+            let plain_blob = blob.and_then(|b| crypto::decrypt(key, &b));
+            conn.execute(
+                &format!("UPDATE {table} SET content_text = ?, content_blob = ? WHERE id = ?"),
+                params![plain_text, plain_blob, id],
+            )?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /// 写入忽略应用：保留系统原始显示名（含中文/原始大小写），
 /// 大小写不敏感去重（先删同名其它大小写形式，再插入当前显示名），避免重复条目。
 pub fn insert_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()> {
@@ -422,6 +726,31 @@ pub fn enforce_capacity(conn: &Connection, max: i64) -> rusqlite::Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// P1b · 清理超期数据（含 trash）：
+/// - history：未置顶且 `created_at` 超期（按「留存天数」从创建时刻计）；
+/// - trash：按 `deleted_at` 超期（按「在回收站停留时长」计，决策 2）。
+/// `days <= 0` 视为永久保留，直接返回 0 不删除。
+pub fn purge_expired(conn: &Connection, days: i64) -> rusqlite::Result<usize> {
+    if days <= 0 {
+        return Ok(0);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let cutoff = now - days * 86_400_000;
+    let n_hist = conn.execute(
+        "DELETE FROM history WHERE is_pinned = 0 AND created_at < ?",
+        [cutoff],
+    )?;
+    // trash 无置顶概念，按「回收站停留时长」(deleted_at) 过期。
+    let n_trash = conn.execute("DELETE FROM trash WHERE deleted_at < ?", [cutoff])?;
+    // P2 · 安全删除：secure_delete=ON 已在 migrate 开启，DELETE 已零覆写；
+    // 此处 VACUUM 回收空闲页，避免超期内容残留在数据库文件空闲区。
+    let _ = conn.execute("VACUUM", []);
+    Ok((n_hist + n_trash) as usize)
 }
 
 /// 已知文件管理器来源（忽略大小写）。这些来源复制的「文本」极可能是文件名而非正文，
@@ -657,25 +986,69 @@ mod tests {
             size_bytes: 10,
             hash: hash.into(),
             created_at,
+            is_sensitive: false,
         }
     }
 
     #[test]
     fn insert_then_get_reverse_chrono() {
         let c = mem_db();
-        insert_or_bump(&c, &sample("a", 100)).unwrap();
-        insert_or_bump(&c, &sample("b", 200)).unwrap();
-        let items = get_history(&c, 100, true).unwrap();
+        insert_or_bump(&c, None, &sample("a", 100)).unwrap();
+        insert_or_bump(&c, None, &sample("b", 200)).unwrap();
+        let items = get_history(&c, None, 100, true).unwrap();
         assert_eq!(items.len(), 2);
         // 时间倒序：后插入的 b(200) 在前面
         assert_eq!(items[0].hash, "b");
         assert_eq!(items[1].hash, "a");
     }
 
+    /// P1-验收 · 旧库升级：模拟「不含 `is_sensitive` 列的已部署库」，migrate 应能幂等补列，
+    /// 且原数据可正常读写、is_sensitive 默认为 0。
+    #[test]
+    fn migrate_adds_is_sensitive_to_legacy_db() {
+        // 用旧结构（无 is_sensitive）建表，插入一条数据。
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE history (id INTEGER PRIMARY KEY, content_type TEXT NOT NULL, \
+             content_text TEXT NOT NULL DEFAULT '', content_blob BLOB, source_app TEXT NOT NULL DEFAULT '', \
+             size_bytes INTEGER NOT NULL DEFAULT 0, hash TEXT NOT NULL, is_pinned INTEGER NOT NULL DEFAULT 0, \
+             is_favorite INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) \
+             VALUES ('text','legacy','App',5,'h1',1000)",
+            [],
+        )
+        .unwrap();
+
+        // 跑迁移（应补列且不破坏原数据）。
+        migrate(&c).unwrap();
+
+        // 列已存在。
+        let has_col: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('history') WHERE name = 'is_sensitive'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_col, 1);
+
+        // 原数据可正常读出，is_sensitive 默认 false。
+        let items = get_history(&c, None, 10, false).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].hash, "h1");
+        assert!(!items[0].is_sensitive);
+
+        // 再次 migrate 幂等（不报错）。
+        migrate(&c).unwrap();
+    }
+
     #[test]
     fn get_recent_tray_excludes_file_type() {
         let c = mem_db();
-        insert_or_bump(&c, &sample("text-a", 100)).unwrap();
+        insert_or_bump(&c, None, &sample("text-a", 100)).unwrap();
         // 直接插入一条「文件」类型，模拟 Finder 复制文件被捕获的场景。
         c.execute(
             "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, created_at) \
@@ -683,21 +1056,21 @@ mod tests {
             [],
         )
         .unwrap();
-        let tray = get_recent_tray(&c, 100).unwrap();
+        let tray = get_recent_tray(&c, None, 100).unwrap();
         // 托盘菜单应排除文件类型，仅保留文本条目。
         assert_eq!(tray.len(), 1);
         assert_eq!(tray[0].hash, "text-a");
         assert_eq!(tray[0].content_type, crate::models::ContentType::Text);
         // 反向校验：get_history 仍包含全部（主界面照常展示文件）。
-        assert_eq!(get_history(&c, 100, true).unwrap().len(), 2);
+        assert_eq!(get_history(&c, None, 100, true).unwrap().len(), 2);
     }
 
     #[test]
     fn delete_moves_to_trash() {
         let mut c = mem_db();
-        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         delete_item(&mut c, id).unwrap();
-        assert!(get_history(&c, 100, true).unwrap().is_empty());
+        assert!(get_history(&c, None, 100, true).unwrap().is_empty());
         let trash_count: i64 = c
             .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
             .unwrap();
@@ -707,13 +1080,13 @@ mod tests {
     #[test]
     fn delete_items_only_targeted_rows() {
         let mut c = mem_db();
-        let keep = insert_or_bump(&c, &sample("keep", 100)).unwrap();
-        let a = insert_or_bump(&c, &sample("a", 200)).unwrap();
-        let b = insert_or_bump(&c, &sample("b", 300)).unwrap();
+        let keep = insert_or_bump(&c, None, &sample("keep", 100)).unwrap();
+        let a = insert_or_bump(&c, None, &sample("a", 200)).unwrap();
+        let b = insert_or_bump(&c, None, &sample("b", 300)).unwrap();
         // 仅删除 a、b，保留 keep。
         let n = delete_items(&mut c, &[a, b]).unwrap();
         assert_eq!(n, 2);
-        let items = get_history(&c, 100, true).unwrap();
+        let items = get_history(&c, None, 100, true).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, keep);
         let trash_count: i64 = c
@@ -725,20 +1098,20 @@ mod tests {
     #[test]
     fn delete_items_empty_is_noop() {
         let mut c = mem_db();
-        insert_or_bump(&c, &sample("a", 100)).unwrap();
+        insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         let n = delete_items(&mut c, &[]).unwrap();
         assert_eq!(n, 0);
-        assert_eq!(get_history(&c, 100, true).unwrap().len(), 1);
+        assert_eq!(get_history(&c, None, 100, true).unwrap().len(), 1);
     }
 
 
     #[test]
     fn insert_or_bump_dedups_by_hash() {
         let c = mem_db();
-        let id1 = insert_or_bump(&c, &sample("same", 100)).unwrap();
-        let id2 = insert_or_bump(&c, &sample("same", 999)).unwrap();
+        let id1 = insert_or_bump(&c, None, &sample("same", 100)).unwrap();
+        let id2 = insert_or_bump(&c, None, &sample("same", 999)).unwrap();
         assert_eq!(id1, id2, "同 hash 应复用同一行");
-        let items = get_history(&c, 100, true).unwrap();
+        let items = get_history(&c, None, 100, true).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].created_at, 999, "created_at 应更新为最新");
     }
@@ -747,7 +1120,7 @@ mod tests {
     fn capacity_is_enforced() {
         let c = mem_db();
         for i in 0..(MAX_HISTORY + 10) {
-            insert_or_bump(&c, &sample(&format!("h{i}"), i)).unwrap();
+            insert_or_bump(&c, None, &sample(&format!("h{i}"), i)).unwrap();
         }
         let count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
         assert_eq!(count, MAX_HISTORY);
@@ -756,9 +1129,9 @@ mod tests {
     #[test]
     fn toggle_pin_works() {
         let c = mem_db();
-        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         assert!(toggle_pin(&c, id).unwrap());
-        let items = get_history(&c, 100, true).unwrap();
+        let items = get_history(&c, None, 100, true).unwrap();
         assert!(items[0].is_pinned);
     }
 
@@ -785,9 +1158,9 @@ mod tests {
     #[test]
     fn get_trash_returns_deleted() {
         let mut c = mem_db();
-        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         delete_item(&mut c, id).unwrap();
-        let trash = get_trash(&c).unwrap();
+        let trash = get_trash(&c, None).unwrap();
         assert_eq!(trash.len(), 1);
         assert_eq!(trash[0].hash, "a");
     }
@@ -795,10 +1168,10 @@ mod tests {
     #[test]
     fn restore_moves_back_to_history() {
         let mut c = mem_db();
-        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         delete_item(&mut c, id).unwrap();
         restore_item(&mut c, id).unwrap();
-        assert_eq!(get_history(&c, 100, true).unwrap().len(), 1);
+        assert_eq!(get_history(&c, None, 100, true).unwrap().len(), 1);
         let trash_count: i64 = c
             .query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0))
             .unwrap();
@@ -808,7 +1181,7 @@ mod tests {
     #[test]
     fn purge_removes_from_trash() {
         let mut c = mem_db();
-        let id = insert_or_bump(&c, &sample("a", 100)).unwrap();
+        let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         delete_item(&mut c, id).unwrap();
         purge_item(&mut c, id).unwrap();
         let trash_count: i64 = c
@@ -820,8 +1193,8 @@ mod tests {
     #[test]
     fn empty_trash_clears_all() {
         let mut c = mem_db();
-        let a = insert_or_bump(&c, &sample("a", 100)).unwrap();
-        let b = insert_or_bump(&c, &sample("b", 200)).unwrap();
+        let a = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
+        let b = insert_or_bump(&c, None, &sample("b", 200)).unwrap();
         delete_item(&mut c, a).unwrap();
         delete_item(&mut c, b).unwrap();
         empty_trash(&c).unwrap();
@@ -834,9 +1207,9 @@ mod tests {
     #[test]
     fn clear_history_moves_all_to_trash() {
         let mut c = mem_db();
-        insert_or_bump(&c, &sample("a", 100)).unwrap();
-        insert_or_bump(&c, &sample("b", 200)).unwrap();
-        insert_or_bump(&c, &sample("c", 300)).unwrap();
+        insert_or_bump(&c, None, &sample("a", 100)).unwrap();
+        insert_or_bump(&c, None, &sample("b", 200)).unwrap();
+        insert_or_bump(&c, None, &sample("c", 300)).unwrap();
         clear_history(&mut c).unwrap();
         // history 被清空
         let hist_count: i64 = c
@@ -849,7 +1222,7 @@ mod tests {
             .unwrap();
         assert_eq!(trash_count, 3);
         // 回收站保留原 content，可恢复
-        let restored = get_trash(&c).unwrap();
+        let restored = get_trash(&c, None).unwrap();
         let hashes: Vec<String> = restored.iter().map(|i| i.hash.clone()).collect();
         assert!(hashes.contains(&"a".to_string()));
         assert!(hashes.contains(&"b".to_string()));
@@ -942,5 +1315,108 @@ mod tests {
         // 迁移标记已写入
         assert_eq!(get_string_setting(&c, "mig_file_v1", ""), "1");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn save_type_enabled_respects_settings() {
+        use crate::models::ContentType;
+        let c = mem_db();
+        // 默认三类均启用（Link/Code 归入文本，受 save_text 控制）。
+        assert!(save_type_enabled(&c, ContentType::Text));
+        assert!(save_type_enabled(&c, ContentType::Link));
+        assert!(save_type_enabled(&c, ContentType::Code));
+        assert!(save_type_enabled(&c, ContentType::Image));
+        assert!(save_type_enabled(&c, ContentType::File));
+        // 禁用文本类型：影响 Text/Link/Code，不影响 Image/File。
+        update_setting(&c, "save_text", "0").unwrap();
+        assert!(!save_type_enabled(&c, ContentType::Text));
+        assert!(!save_type_enabled(&c, ContentType::Link));
+        assert!(!save_type_enabled(&c, ContentType::Code));
+        assert!(save_type_enabled(&c, ContentType::Image));
+        assert!(save_type_enabled(&c, ContentType::File));
+        // 禁用图片类型。
+        update_setting(&c, "save_image", "0").unwrap();
+        assert!(!save_type_enabled(&c, ContentType::Image));
+        // 恢复文本、禁用文件。
+        update_setting(&c, "save_text", "1").unwrap();
+        update_setting(&c, "save_file", "0").unwrap();
+        assert!(save_type_enabled(&c, ContentType::Text));
+        assert!(!save_type_enabled(&c, ContentType::File));
+    }
+
+    #[test]
+    fn purge_expired_clears_history_and_trash() {
+        use rusqlite::params;
+        let c = mem_db();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let old = now - 100 * 86_400_000;
+        // 未置顶旧条目（应删）+ 置顶旧条目（保留）+ 新条目（保留）
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned, is_favorite) VALUES ('text','old',?,0,'h_old',?,0,0)",
+            params!["app", old],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned, is_favorite) VALUES ('text','pinned',?,0,'h_pin',?,1,0)",
+            params!["app", old],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned, is_favorite) VALUES ('text','new',?,0,'h_new',?,0,0)",
+            params!["app", now],
+        )
+        .unwrap();
+        // trash：旧条目（按 deleted_at 过期，应删）+ 新条目（保留）
+        c.execute(
+            "INSERT INTO trash (content_type, content_text, source_app, size_bytes, hash, created_at, deleted_at, is_pinned, is_favorite) VALUES ('text','told',?,0,'t_old',?,?,0,0)",
+            params!["app", old, old],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO trash (content_type, content_text, source_app, size_bytes, hash, created_at, deleted_at, is_pinned, is_favorite) VALUES ('text','tnew',?,0,'t_new',?,?,0,0)",
+            params!["app", now, now],
+        )
+        .unwrap();
+
+        // 30 天留存：删除 1 条超期未置顶历史 + 1 条超期 trash = 2。
+        let n = purge_expired(&c, 30).unwrap();
+        assert_eq!(n, 2);
+        let hist_count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(hist_count, 2); // 置顶旧 + 新
+        let trash_count: i64 = c.query_row("SELECT COUNT(*) FROM trash", [], |r| r.get(0)).unwrap();
+        assert_eq!(trash_count, 1);
+
+        // days<=0 不删除
+        assert_eq!(purge_expired(&c, 0).unwrap(), 0);
+    }
+
+    /// 清除主密码：用密钥解密全部已加密内容回明文。
+    #[test]
+    fn decrypt_all_to_plaintext_roundtrip() {
+        let c = mem_db();
+        let key = Key([7u8; 32]);
+        let secret = b"top-secret-token-123";
+        let enc = STANDARD.encode(crypto::encrypt(&key, secret));
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) \
+             VALUES ('text', ?, 'App', ?, 'h1', 1000)",
+            params![enc, secret.len() as i64],
+        )
+        .unwrap();
+        // 解密前：存储的是 base64 密文，不等于原文。
+        let before: String = c
+            .query_row("SELECT content_text FROM history WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_ne!(before, std::str::from_utf8(secret).unwrap());
+        // 解密后：恢复明文。
+        let n = decrypt_all_to_plaintext(&c, &key).unwrap();
+        assert_eq!(n, 1);
+        let after: String = c
+            .query_row("SELECT content_text FROM history WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, std::str::from_utf8(secret).unwrap());
     }
 }

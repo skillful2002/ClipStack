@@ -14,6 +14,7 @@ import {
   AboutIcon,
   HelpIcon,
   AllIcon,
+  MainWindowIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -80,6 +81,18 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-bottom">
+        <button
+          className={`nav-item${view === "main" ? " active" : ""}`}
+          onClick={() => {
+            setCategory("all");
+            setView("main");
+          }}
+        >
+          <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+            <MainWindowIcon size={16} />
+          </span>
+          <span className="nav-label">{t("sidebar.main")}</span>
+        </button>
         <button
           className={`nav-item${view === "settings" ? " active" : ""}`}
           onClick={() => setView("settings")}

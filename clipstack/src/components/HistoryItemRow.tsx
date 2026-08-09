@@ -48,6 +48,11 @@ export function HistoryItemRow({
       <div className="item-badges">
         {item.isPinned && <PinIcon size={14} active />}
         {item.isFavorite && <StarIcon size={14} active />}
+        {item.isSensitive && (
+          <span className="item-sensitive" title={t("item.sensitiveHint")}>
+            {t("item.sensitive")}
+          </span>
+        )}
       </div>
 
       <div className="item-actions" onClick={(e) => e.stopPropagation()}>

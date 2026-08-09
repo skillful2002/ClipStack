@@ -124,3 +124,61 @@ export const getSystemInfo = (): Promise<SystemInfo> =>
 /** 首次运行判定：窗口显示与标记写入已在启动阶段同步完成；此处仅读取标志，供前端决定是否进入设置页。 */
 export const wasFirstRun = (): Promise<boolean> =>
   invoke<boolean>("was_first_run");
+
+// ===== P0 · 应用锁 / 主密码命令封装 =====
+
+/** 是否已设置主密码（前端据此显示「设置」还是「解锁 / 修改」）。 */
+export const hasMasterPassword = (): Promise<boolean> =>
+  invoke<boolean>("has_master_password");
+
+/** 当前是否锁定。 */
+export const isLocked = (): Promise<boolean> => invoke<boolean>("is_locked");
+
+/** 首次设置主密码：仅写入校验信息；数据库加密由内部密钥负责（与主密码无关）。 */
+export const setupMasterPassword = (pwd: string): Promise<void> =>
+  invoke<void>("setup_master_password", { pwd });
+
+/** 主密码解锁：校验通过后解除应用锁（数据库内部密钥始终在内存，不载入加解密密钥）。 */
+export const unlock = (pwd: string): Promise<boolean> =>
+  invoke<boolean>("unlock", { pwd });
+
+/** 钥匙串 + Touch ID 解锁：触发生物识别，成功后解除应用锁（非 macOS 回退失败）。 */
+export const unlockTouchId = (): Promise<boolean> =>
+  invoke<boolean>("unlock_touch_id");
+
+/** 启用 / 关闭 Touch ID 解锁：写入受 BiometryCurrentSet 保护的随机令牌（仅用于生物识别校验，不参与加解密）。 */
+export const setTouchId = (enabled: boolean): Promise<void> =>
+  invoke<void>("set_touch_id", { enabled });
+
+/** 立即锁定：仅置应用锁标记，不清空数据库加密密钥。 */
+export const lockApp = (): Promise<void> => invoke<void>("lock");
+
+/** 上报一次用户活动：重置后端「闲置自动锁定」计时（前端已做限流调用）。 */
+export const touchActivity = (): Promise<void> => invoke<void>("touch_activity");
+
+/** 修改主密码：校验原密码后更新校验信息（不影响数据库加密，不重加密数据）。 */
+export const changeMasterPassword = (
+  oldPwd: string,
+  newPwd: string,
+): Promise<void> =>
+  invoke<void>("change_master_password", { oldPwd, newPwd });
+
+/** 清除主密码：直接移除应用锁凭据与 Touch ID 设置（无需旧密码）；数据库仍以内部密钥加密（不解密）。 */
+export const clearMasterPassword = (): Promise<void> =>
+  invoke<void>("clear_master_password");
+
+/** 检测 Touch ID 解锁是否可用（需要安装 Xcode Command Line Tools 才能运行 swift 子进程）。 */
+export const checkTouchIdAvailable = (): Promise<boolean> =>
+  invoke<boolean>("check_touch_id_available");
+
+/** 订阅应用锁状态变化（后端自动锁触发，payload=true 表示已锁定）。 */
+export const onAppLockChanged = (
+  cb: (locked: boolean) => void,
+): Promise<UnlistenFn> =>
+  listen<boolean>("app-lock-changed", (event) => cb(event.payload));
+
+// ===== P1b · 留存过期命令封装 =====
+
+/** 立即按 retention_days 清理超期历史（未置顶）与回收站内容，返回删除条数。 */
+export const purgeExpired = (): Promise<number> =>
+  invoke<number>("purge_expired");

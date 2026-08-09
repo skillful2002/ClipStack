@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
 import { applyTheme, type Theme } from "../lib/theme";
+import { SecuritySettings } from "./SecuritySettings";
+import { SaveTypesSettings } from "./SaveTypesSettings";
+import { RetentionSettings } from "./RetentionSettings";
 import { useHistory } from "../store/history";
 import { useT, useI18nStore, LANGUAGE_OPTIONS, type Language } from "../lib/i18n";
 
@@ -245,6 +248,9 @@ export function SettingsView() {
           />
         </div>
         <p className="settings-hint">{t("settings.trayHistoryHint")}</p>
+
+        <RetentionSettings />
+        <SaveTypesSettings />
       </div>
 
       <div className="settings-card">
@@ -329,6 +335,8 @@ export function SettingsView() {
         </div>
         <p className="settings-note">{t("settings.ignoredNote")}</p>
       </div>
+
+      <SecuritySettings />
     </section>
   );
 }

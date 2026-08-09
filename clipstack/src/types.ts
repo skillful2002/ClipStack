@@ -11,6 +11,8 @@ export interface HistoryItem {
   contentText: string;
   /** 展示用预览（长文本截断）。 */
   preview: string;
+  /** 是否命中敏感内容识别（启用掩码时预览被遮挡）。 */
+  isSensitive: boolean;
   sourceApp: string;
   sizeBytes: number;
   hash: string;

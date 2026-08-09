@@ -9,65 +9,123 @@ use std::sync::{
     Arc, Mutex,
 };
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::AppState;
 use crate::clipboard::MonitorState;
+use crate::crypto;
 use crate::db::{self, DbState, DEFAULT_LIMIT};
+use crate::keychain;
 use crate::models::{ContentType, HistoryItem, NewItem, Setting};
+
+/// P0：内容类命令门禁——锁定态返回 Err("locked")。
+fn ensure_unlocked(state: &AppState) -> Result<(), String> {
+    if state.is_locked() {
+        Err("locked".into())
+    } else {
+        Ok(())
+    }
+}
 
 /// 新增条目（手动添加 / 前端回写场景）。返回新行 id。
 #[tauri::command]
-pub fn add_item(db: State<'_, DbState>, item: NewItem) -> Result<i64, String> {
+pub fn add_item(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    item: NewItem,
+) -> Result<i64, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let conn = db.lock();
-    db::insert_or_bump(&conn, &item).map_err(|e| e.to_string())
+    let key_guard = db.key.lock().expect("key lock poisoned");
+    db::insert_or_bump(&conn, key_guard.as_ref(), &item).map_err(|e| e.to_string())
 }
 
 /// 读取历史（默认 500 条、置顶优先、时间倒序）。
 #[tauri::command]
-pub fn get_history(db: State<'_, DbState>, limit: Option<i64>) -> Result<Vec<HistoryItem>, String> {
+pub fn get_history(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> Result<Vec<HistoryItem>, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let limit = limit.unwrap_or(DEFAULT_LIMIT);
     let conn = db.lock();
-    db::get_history(&conn, limit, true).map_err(|e| e.to_string())
+    let key_guard = db.key.lock().expect("key lock poisoned");
+    db::get_history(&conn, key_guard.as_ref(), limit, true).map_err(|e| e.to_string())
 }
 
 /// 删除条目（移入回收站）。
 #[tauri::command]
-pub fn delete_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
+pub fn delete_item(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let mut conn = db.lock();
     db::delete_item(&mut conn, id).map_err(|e| e.to_string())
 }
 
 /// 读取回收站（按删除时间倒序）。
 #[tauri::command]
-pub fn get_trash(db: State<'_, DbState>) -> Result<Vec<HistoryItem>, String> {
+pub fn get_trash(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+) -> Result<Vec<HistoryItem>, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let conn = db.lock();
-    db::get_trash(&conn).map_err(|e| e.to_string())
+    let key_guard = db.key.lock().expect("key lock poisoned");
+    db::get_trash(&conn, key_guard.as_ref()).map_err(|e| e.to_string())
 }
 
 /// 恢复：从回收站移回历史。
 #[tauri::command]
-pub fn restore_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
+pub fn restore_item(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let mut conn = db.lock();
     db::restore_item(&mut conn, id).map_err(|e| e.to_string())
 }
 
 /// 彻底删除：从回收站永久移除。
 #[tauri::command]
-pub fn purge_item(db: State<'_, DbState>, id: i64) -> Result<(), String> {
+pub fn purge_item(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let mut conn = db.lock();
     db::purge_item(&mut conn, id).map_err(|e| e.to_string())
 }
 
 /// 清空回收站。
 #[tauri::command]
-pub fn empty_trash(db: State<'_, DbState>) -> Result<(), String> {
+pub fn empty_trash(db: State<'_, DbState>, state: State<'_, AppState>) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let conn = db.lock();
     db::empty_trash(&conn).map_err(|e| e.to_string())
 }
 
 /// 清空全部历史（软删入回收站，可回收站恢复）。
 #[tauri::command]
-pub fn clear_history(db: State<'_, DbState>) -> Result<(), String> {
+pub fn clear_history(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let mut conn = db.lock();
     db::clear_history(&mut conn).map_err(|e| e.to_string())
 }
@@ -75,21 +133,39 @@ pub fn clear_history(db: State<'_, DbState>) -> Result<(), String> {
 /// 按 id 批量删除（软删入回收站，可回收站恢复）。用于「按当前查询条件清除」：
 /// 前端把 `filterItems` 命中的 id 列表传入，仅删除这些行，不影响其它条目。
 #[tauri::command]
-pub fn delete_items(db: State<'_, DbState>, ids: Vec<i64>) -> Result<usize, String> {
+pub fn delete_items(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<usize, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let mut conn = db.lock();
     db::delete_items(&mut conn, &ids).map_err(|e| e.to_string())
 }
 
 /// 切换置顶，返回切换后状态。
 #[tauri::command]
-pub fn toggle_pin(db: State<'_, DbState>, id: i64) -> Result<bool, String> {
+pub fn toggle_pin(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<bool, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let conn = db.lock();
     db::toggle_pin(&conn, id).map_err(|e| e.to_string())
 }
 
 /// 切换收藏，返回切换后状态。
 #[tauri::command]
-pub fn toggle_favorite(db: State<'_, DbState>, id: i64) -> Result<bool, String> {
+pub fn toggle_favorite(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<bool, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     let conn = db.lock();
     db::toggle_favorite(&conn, id).map_err(|e| e.to_string())
 }
@@ -105,7 +181,9 @@ pub fn update_setting(
 ) -> Result<(), String> {
     // 注意：app.emit 会同步触发监听器并再次 lock db，必须先释放本命令持有的 db 锁，
     // 否则 build_menu 在监听器内等待 db 锁 → 与命令持有的锁相互等待 → 死锁卡死。
-    let refresh_tray = key == "tray_history_count";
+    // 仅对影响托盘菜单内容的设置变更才重建托盘（避免每次写设置都重建）。
+    // mask_sensitive 改变后，托盘最近历史需按新开关重新脱敏。
+    let refresh_tray = key == "tray_history_count" || key == "mask_sensitive";
     {
         let conn = db.lock();
         db::update_setting(&conn, &key, &value).map_err(|e| e.to_string())?;
@@ -168,7 +246,10 @@ pub fn copy_item(
     content_type: ContentType,
     content_text: String,
     monitor: State<'_, Arc<Mutex<MonitorState>>>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
     if matches!(content_type, ContentType::Image | ContentType::File) {
         return Err("该类型暂不支持一键复制".into());
     }
@@ -177,46 +258,36 @@ pub fn copy_item(
     crate::clipboard::set_clipboard_text(&content_text)
 }
 
-/// 一键复制图片：从数据库读取 PNG 二进制，解码后写回系统剪贴板。
+/// 一键复制图片：从数据库读取 PNG 二进制（已解密），解码后写回系统剪贴板。
 #[tauri::command]
 pub fn copy_image(
     id: i64,
     db: State<'_, DbState>,
     monitor: State<'_, Arc<Mutex<MonitorState>>>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let conn = db.lock();
-    let blob: Option<Vec<u8>> = conn
-        .query_row(
-            "SELECT content_blob FROM history WHERE id = ?",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    drop(conn);
-    let png_bytes = blob.ok_or_else(|| "该图片无二进制数据".to_string())?;
+    ensure_unlocked(&state)?;
+    state.touch_activity();
+    let png_bytes = db::read_item_raw(&db, id, "history")
+        .and_then(|(b, _)| b)
+        .ok_or_else(|| "该图片无二进制数据".to_string())?;
     // 先占位，避免监控线程把主动复制的图片重新捕获。
     crate::clipboard::note_self_copy_image(&monitor, &png_bytes);
     crate::clipboard::set_clipboard_image(&png_bytes)
 }
 
-/// 一键复制文件：从数据库读取路径列表（存于 content_blob，JSON 数组；
-/// 旧格式则可能以 ", " 拼在 content_text 中），写回系统剪贴板文件列表，可粘贴为文件本身。
+/// 一键复制文件：从数据库读取路径列表（已解密），写回系统剪贴板文件列表，可粘贴为文件本身。
 #[tauri::command]
 pub fn copy_file(
     id: i64,
     db: State<'_, DbState>,
     monitor: State<'_, Arc<Mutex<MonitorState>>>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let conn = db.lock();
-    let row: (Option<Vec<u8>>, String) = conn
-        .query_row(
-            "SELECT content_blob, content_text FROM history WHERE id = ?",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    drop(conn);
-    let (blob, text) = row;
+    ensure_unlocked(&state)?;
+    state.touch_activity();
+    let (blob, text) = db::read_item_raw(&db, id, "history")
+        .ok_or_else(|| "该条目不存在".to_string())?;
     let paths = paths_from_storage(blob.as_deref(), &text);
     if paths.is_empty() {
         return Err("该条目无可复制的文件路径".to_string());
@@ -240,36 +311,31 @@ pub(crate) fn paths_from_storage(blob: Option<&[u8]>, text: &str) -> Vec<PathBuf
         .collect()
 }
 
-/// 读取条目的二进制内容（图片为 PNG 字节），用于详情面板预览。
+/// 读取条目的二进制内容（图片为 PNG 字节，已解密），用于详情面板预览。
 /// 文本 / 链接 / 代码类条目无二进制，返回错误。
 #[tauri::command]
-pub fn get_item_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String> {
-    let conn = db.lock();
-    // query_row 在无匹配行时返回 Err(QueryReturnedNoRows)，经 map_err 转为错误字符串。
-    let row: (Option<Vec<u8>>, String) = conn
-        .query_row(
-            "SELECT content_blob, content_type FROM history WHERE id = ?",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    let (blob, _ctype) = row;
+pub fn get_item_blob(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<Vec<u8>, String> {
+    ensure_unlocked(&state)?;
+    let (blob, _) = db::read_item_raw(&db, id, "history")
+        .ok_or_else(|| "该条目不存在".to_string())?;
     blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
 }
 
-/// 读取回收站条目的二进制内容（图片为 PNG 字节），用于回收站详情面板预览。
+/// 读取回收站条目的二进制内容（图片为 PNG 字节，已解密），用于回收站详情面板预览。
 /// 与 `get_item_blob` 类似，但查询的是 `trash` 表。
 #[tauri::command]
-pub fn get_trash_blob(db: State<'_, DbState>, id: i64) -> Result<Vec<u8>, String> {
-    let conn = db.lock();
-    let row: (Option<Vec<u8>>, String) = conn
-        .query_row(
-            "SELECT content_blob, content_type FROM trash WHERE id = ?",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    let (blob, _ctype) = row;
+pub fn get_trash_blob(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<Vec<u8>, String> {
+    ensure_unlocked(&state)?;
+    let (blob, _) = db::read_item_raw(&db, id, "trash")
+        .ok_or_else(|| "该条目不存在".to_string())?;
     blob.ok_or_else(|| "该条目无二进制内容（仅图片支持预览）".to_string())
 }
 
@@ -303,6 +369,235 @@ pub fn get_system_info() -> SystemInfo {
 #[tauri::command]
 pub fn was_first_run(flag: State<'_, Arc<AtomicBool>>) -> bool {
     flag.load(Ordering::SeqCst)
+}
+
+// ===== P0 · 应用锁 / 主密码 =====
+
+/// 首次设置主密码：仅写入校验信息（盐 + 哈希）。
+///
+/// 设计调整：数据库内容加密由程序内部的固定密钥负责（启动阶段已载入内存），
+/// 与主密码无关；主密码只作为「应用锁」凭据。因此设置主密码**不派生也不写入任何
+/// 数据库加密密钥**，也不重加密已有数据。Touch ID 解锁令牌由 `set_touch_id` 另行写入。
+#[tauri::command]
+pub fn setup_master_password(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    pwd: String,
+) -> Result<(), String> {
+    if pwd.len() < 6 {
+        return Err("主密码至少 6 位".into());
+    }
+    let conn = db.conn.lock().expect("db lock poisoned");
+    if db::has_master_password(&conn) {
+        return Err("主密码已设置，请使用「修改主密码」".into());
+    }
+    let salt = crypto::random_salt();
+    let salt_b64 = STANDARD.encode(salt);
+    let verifier = crypto::hash_password(&pwd, &salt);
+    db::set_master_password(&conn, &salt_b64, &verifier)
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // 内部数据库密钥已在启动阶段载入内存（见 lib.rs），此处无需再从主密码派生。
+    // 明文历史迁移同样在启动阶段完成（mig_enc_v1）。
+    state.set_locked(false);
+    Ok(())
+}
+
+/// 主密码解锁：校验通过后解除「应用锁」。
+///
+/// 设计调整：内部数据库密钥始终在内存，主密码仅用于解锁 UI / 托盘展示，
+/// 不再派生或载入任何加解密密钥。
+#[tauri::command]
+pub fn unlock(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    pwd: String,
+) -> Result<bool, String> {
+    let conn = db.conn.lock().expect("poisoned");
+    let verifier = db::get_pw_verifier(&conn);
+    if verifier.is_empty() {
+        return Err("尚未设置主密码".into());
+    }
+    if !crypto::verify_password(&pwd, &verifier) {
+        return Ok(false);
+    }
+    drop(conn);
+
+    // 内部密钥已常驻内存，此处仅解除应用锁；随后刷新托盘菜单。
+    state.set_locked(false);
+    let _ = app.emit("refresh-tray", ());
+    Ok(true)
+}
+
+/// Touch ID 解锁：通过系统 `LocalAuthentication` 验证当前登录用户后解除「应用锁」。
+/// 非 macOS 平台回退错误（请用主密码）。
+///
+/// 实现说明：macOS 26+ 的 LAContext 已移除同步版 `evaluatePolicy:localizedReason:error:`，
+/// 且裸二进制经 objc2 直接调用会抛 `unrecognized selector` 崩溃。故由
+/// `keychain::authenticate_user` 启动 Swift 子进程（独立进程、Apple 签名）完成
+/// Touch ID / 登录密码验证——有 Touch ID 时弹生物识别，否则回退设备登录密码。
+/// 不依赖钥匙串中任何存储的秘密。
+#[tauri::command]
+pub fn unlock_touch_id(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let conn = db.conn.lock().expect("poisoned");
+    if !db::has_master_password(&conn) {
+        return Err("尚未设置主密码".into());
+    }
+    drop(conn);
+
+    // 验证当前登录用户（Touch ID / 登录密码），由 Swift 子进程独立完成。
+    keychain::authenticate_user("解锁 ClipStack")?;
+
+    // 内部密钥已常驻内存，此处仅解除应用锁；随后刷新托盘菜单。
+    state.set_locked(false);
+    let _ = app.emit("refresh-tray", ());
+    Ok(true)
+}
+
+/// 锁定：仅置「应用锁」标记，使 UI / 托盘历史不可读。
+///
+/// 设计调整：不再清空内存中的内部数据库密钥——数据库加密由程序内部密钥负责、
+/// 与主密码无关，锁定只保护界面与托盘展示，不影响落库数据的加密状态。
+#[tauri::command]
+pub fn lock(app: AppHandle, _db: State<'_, DbState>, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_locked(true);
+    // 锁定后刷新托盘菜单，用「已锁定」占位项替换历史，避免托盘泄露。
+    let _ = app.emit("refresh-tray", ());
+    Ok(())
+}
+
+/// 上报一次用户活动：重置「闲置自动锁定」计时，避免活跃使用时被误锁。
+/// 由前端在用户与界面交互（点击 / 按键 / 窗口聚焦）时调用，做了限流。
+#[tauri::command]
+pub fn touch_activity(state: State<'_, AppState>) {
+    state.touch_activity();
+}
+
+/// 修改主密码：仅更新校验信息。
+///
+/// 设计调整：主密码仅控制「应用锁」，与数据库加密密钥无关，故修改主密码
+/// **不重加密数据、不动内部密钥、不写钥匙串**。
+#[tauri::command]
+pub fn change_master_password(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    old_pwd: String,
+    new_pwd: String,
+) -> Result<(), String> {
+    if new_pwd.len() < 6 {
+        return Err("新主密码至少 6 位".into());
+    }
+    let conn = db.conn.lock().expect("poisoned");
+    let verifier = db::get_pw_verifier(&conn);
+    if !crypto::verify_password(&old_pwd, &verifier) {
+        return Err("原主密码错误".into());
+    }
+    let salt = crypto::random_salt();
+    let salt_b64 = STANDARD.encode(salt);
+    let new_verifier = crypto::hash_password(&new_pwd, &salt);
+    db::set_master_password(&conn, &salt_b64, &new_verifier)
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // 内部密钥与落库数据均不受主密码影响，无需任何重加密或钥匙串操作。
+    state.set_locked(false);
+    Ok(())
+}
+
+/// 清除主密码：无需输入旧密码，直接移除「应用锁」凭据与 Touch ID 设置。
+///
+/// 设计调整：数据库内容由内部密钥加密、与主密码无关，清除主密码**不解密**已加密数据、
+/// 不删除内部密钥、不触碰落库内容。清除后应用回到「无应用锁」状态（数据仍以内部密钥加密）。
+#[tauri::command]
+pub fn clear_master_password(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = db.conn.lock().expect("poisoned");
+    if !db::has_master_password(&conn) {
+        return Err("尚未设置主密码".into());
+    }
+    // 移除主密码校验信息并关闭 Touch ID 设置（Touch ID 是主密码的增强，无主密码即无意义）。
+    db::clear_master_password(&conn).map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // 清理旧版遗留的 Touch ID 令牌钥匙串项（若有）。
+    let _ = keychain::delete_unlock_key();
+    // 内部密钥仍常驻内存，无需清空；解除应用锁。
+    state.set_locked(false);
+    // 刷新托盘菜单：解除锁定后从「已锁定」占位切回最近历史展示。
+    let _ = app.emit("refresh-tray", ());
+    Ok(())
+}
+
+/// 启用 / 关闭 Touch ID 解锁：仅切换 `use_touch_id` 开关。
+///
+/// 解锁本身由系统 `LocalAuthentication`（LAContext）直接验证当前登录用户——
+/// 有 Touch ID 时弹 Touch ID，否则回退登录密码；钥匙串中不再存放任何解锁令牌。
+/// 关闭时清理旧版遗留的 BiometryCurrentSet 钥匙串项（若有），避免无用项残留。
+/// 内部数据库加密密钥（clipstack.enc）不受影响。
+#[tauri::command]
+pub fn set_touch_id(db: State<'_, DbState>, enabled: bool) -> Result<(), String> {
+    {
+        let conn = db.lock();
+        db::update_setting(&conn, "use_touch_id", if enabled { "1" } else { "0" })
+            .map_err(|e| e.to_string())?;
+    }
+    if !enabled {
+        // 清理旧版遗留的 Touch ID 令牌钥匙串项（受 BiometryCurrentSet 保护）。
+        let _ = keychain::delete_unlock_key();
+    }
+    Ok(())
+}
+
+/// 当前是否处于锁定态。
+#[tauri::command]
+pub fn is_locked(state: State<'_, AppState>) -> bool {
+    state.is_locked()
+}
+
+/// 是否已设置主密码（前端据此决定显示「设置密码」还是「解锁」）。
+#[tauri::command]
+pub fn has_master_password(db: State<'_, DbState>) -> bool {
+    let conn = db.conn.lock().expect("db lock poisoned");
+    db::has_master_password(&conn)
+}
+
+/// P1b：按 `retention_days` 清理超期历史（未置顶）与回收站内容，返回删除条数。
+/// 锁定态亦可执行（仅按时间删除，不读取/泄露内容）。
+#[tauri::command]
+pub fn purge_expired(db: State<'_, DbState>) -> Result<usize, String> {
+    let conn = db.conn.lock().expect("db lock poisoned");
+    let days = db::get_int_setting(&conn, "retention_days", 0);
+    db::purge_expired(&conn, days).map_err(|e| e.to_string())
+}
+
+/// 检测 Touch ID 解锁是否可用——即系统是否安装了 Xcode Command Line Tools
+/// （Touch ID 解锁通过 `/usr/bin/swift` 子进程调用 LAContext，swift 需要 CLT 才能运行）。
+/// macOS 上 `xcode-select -p` 成功即表示 CLT 已安装；非 macOS 始终返回 false。
+#[tauri::command]
+pub fn check_touch_id_available() -> bool {
+    #[cfg(not(target_os = "macos"))]
+    {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("xcode-select")
+            .arg("-p")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(test)]

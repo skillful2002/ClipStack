@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Tauri / WKWebView 需要：启用 JIT 与可执行内存分配 -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!--
+    钥匙串生物识别访问控制（BiometryCurrentSet）要求应用具备代码签名，
+    且签名携带派生的默认 keychain-access-groups 权益。ad-hoc 签名（signingIdentity: "-"）
+    即可满足，无需额外声明 keychain-access-groups（避免与 ad-hoc 的 AppIdentifierPrefix
+    不匹配导致 -34018）。正式分发时由 Developer ID 证书签名并公证。
+  -->
+</dict>
+</plist>

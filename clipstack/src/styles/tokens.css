@@ -12,6 +12,9 @@
   --cs-text-tertiary: #9ca3af;
   --cs-accent: #059669;
   --cs-accent-soft: #ecfdf5;
+  /* 实体填充背景用的强调色（按钮 / 开关选中轨道 / 分段激活等）：
+     浅色模式与 --cs-accent 一致；深色模式下覆盖为更暗的色调，避免刺眼。 */
+  --cs-accent-strong: #059669;
   --cs-section-title-bg: #eceef1;
 
   /* 圆角 / Radius */
