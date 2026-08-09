@@ -4,6 +4,7 @@
 // 未启用安全时展示「设置主密码」；已启用时展示「修改主密码 / 锁定 / 自动锁」。
 
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../lib/tauri";
 import { useLock } from "../store/lock";
 import { useHistory } from "../store/history";
@@ -169,6 +170,10 @@ export function SecuritySettings() {
   const onLockNow = async () => {
     try {
       await api.lockApp();
+      // 先隐藏主窗体（destroyOnClose=false，等同关闭行为），再更新锁定状态，
+      // 避免 LockGate 遮罩在窗口仍可见时被渲染出来。解锁对话框仅在下次从托盘
+      // 重新打开主窗体时出现（tray.rs 发 app-lock-changed + App.tsx 焦点同步）。
+      await getCurrentWindow().hide();
       setLocked(true);
     } catch (e) {
       setToast(String(e));

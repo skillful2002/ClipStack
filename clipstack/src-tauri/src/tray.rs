@@ -241,13 +241,16 @@ fn handle_menu_event(
     }
     match id.as_str() {
         "unlock" => {
-            // 锁定态占位项被点击：打开主界面，前端据此展示锁屏让用户解锁。
+            // 锁定态占位项被点击：打开主界面，并由前端锁屏遮罩要求先解锁。
+            // 后端 locked 本就为 true；此处显式 emit app-lock-changed(true)，
+            // 确保前端（即便窗口曾被隐藏 / webview 重载导致状态丢失）立即进入锁屏。
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.set_focus();
             }
             set_dock_visible(app);
-            let _ = app.emit("show-view", "settings");
+            let _ = app.emit("app-lock-changed", true);
+            let _ = app.emit("show-view", "main");
         }
         "open_main" => {
             if let Some(w) = app.get_webview_window("main") {

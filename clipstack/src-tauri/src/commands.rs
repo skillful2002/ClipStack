@@ -10,7 +10,7 @@ use std::sync::{
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::AppState;
 use crate::clipboard::MonitorState;
@@ -469,6 +469,11 @@ pub fn lock(app: AppHandle, _db: State<'_, DbState>, state: State<'_, AppState>)
     state.set_locked(true);
     // 锁定后刷新托盘菜单，用「已锁定」占位项替换历史，避免托盘泄露。
     let _ = app.emit("refresh-tray", ());
+    // 「立即锁定」专用：锁定后由后端直接隐藏主窗体（Rust 端 hide 不受前端
+    // capability 权限约束，最可靠）。解锁对话框仅在下次从托盘重新 show 时出现。
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
     Ok(())
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { emit } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useHistory, type Category } from "./store/history";
 import {
   onClipboardChanged,
@@ -120,6 +121,33 @@ export default function App() {
       void p2.then((fn) => fn());
     };
   }, [setView, select, setToast]);
+
+  // 窗口从隐藏（托盘 / 全局快捷键）重新显示时，从后端同步真实锁定态，
+  // 确保锁定状态下重新打开能正确弹出锁屏，而不是显示未解锁的主界面。
+  // 防御：窗口隐藏期间 webview 可能被系统回收 / 重载，导致前端 store 的 locked 丢失。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused) return;
+        void (async () => {
+          try {
+            const hw = await hasMasterPassword();
+            useLock.getState().setHasPassword(hw);
+            if (hw) useLock.getState().setLocked(await isLocked());
+          } catch {
+            /* 同步失败则保持当前状态，不阻塞显示 */
+          }
+        })();
+      })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // P5：⌘/ / Ctrl+/ 聚焦搜索框（⌘K 常被其它程序全局占用且优先级更高，改用 ⌘/）。
   useEffect(() => {
