@@ -15,9 +15,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::AppState;
 use crate::clipboard::MonitorState;
 use crate::crypto;
-use crate::db::{self, DbState, DEFAULT_LIMIT};
+use crate::db::{self, DbState, DEFAULT_LIMIT, now_ms};
 use crate::keychain;
+use crate::lan::{LanManager, PeerInfo};
 use crate::models::{ContentType, HistoryItem, NewItem, Setting};
+use uuid::Uuid;
 
 /// P0：内容类命令门禁——锁定态返回 Err("locked")。
 fn ensure_unlocked(state: &AppState) -> Result<(), String> {
@@ -638,4 +640,203 @@ mod tests {
         let paths = paths_from_storage(None, "");
         assert!(paths.is_empty());
     }
+}
+
+// ===== 局域网共享（L2/L3，见 docs/clipstack-lan-sync-design.md）=====
+
+/// 设置局域网共享配置并重启发现（组/密钥变更需重新注册 mDNS 指纹）。
+#[tauri::command]
+pub async fn lan_set_config(
+    state: State<'_, LanManager>,
+    group: String,
+    key: String,
+    name: String,
+    share_out: bool,
+    file_limit_mb: u64,
+    manual_peers: Vec<String>,
+) -> Result<(), String> {
+    let mut cfg = state.config().await;
+    cfg.share_group = group;
+    // 空密钥表示「保持现有密钥」：避免 UI 未重新输入密钥时误清空共享密钥。
+    if !key.is_empty() {
+        cfg.share_key = key;
+    }
+    cfg.device_name = name;
+    cfg.share_out = share_out;
+    cfg.file_limit_mb = file_limit_mb.max(1);
+    cfg.manual_peers = manual_peers;
+    state.set_config(cfg).await;
+    Ok(())
+}
+
+/// 向所有已连对端广播一条测试文本（L2 验证用；L3 由监控线程直接调用 broadcast）。
+#[tauri::command]
+pub async fn lan_send_test(state: State<'_, LanManager>, text: String) -> Result<usize, String> {
+    let item = crate::lan::text_item(&text);
+    Ok(state.broadcast_clip(item).await)
+}
+
+/// 当前组内在线设备列表。
+#[tauri::command]
+pub async fn lan_get_peers(state: State<'_, LanManager>) -> Result<Vec<PeerInfo>, String> {
+    Ok(state.peers().await)
+}
+
+/// 当前局域网配置视图（不含明文密钥）。
+#[tauri::command]
+pub async fn lan_get_config(state: State<'_, LanManager>) -> Result<LanConfigView, String> {
+    let cfg = state.config().await;
+    Ok(LanConfigView {
+        device_id: cfg.device_id,
+        group: cfg.share_group,
+        name: cfg.device_name,
+        share_out: cfg.share_out,
+        file_limit_mb: cfg.file_limit_mb,
+        has_key: !cfg.share_key.is_empty(),
+        manual_peers: cfg.manual_peers,
+    })
+}
+
+/// 局域网配置视图（不泄露明文密钥）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanConfigView {
+    pub device_id: String,
+    pub group: String,
+    pub name: String,
+    pub share_out: bool,
+    pub file_limit_mb: u64,
+    pub has_key: bool,
+    pub manual_peers: Vec<String>,
+}
+
+// ===== 局域网共享 · 配置管理（L3）=====
+
+/// 局域网共享配置视图（不泄露明文密钥）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanProfileView {
+    pub id: String,
+    pub group: String,
+    pub mode: String,
+    pub is_active: bool,
+    pub has_key: bool,
+}
+
+/// 列出全部共享配置。
+#[tauri::command]
+pub async fn lan_list_profiles(db: State<'_, DbState>) -> Result<Vec<LanProfileView>, String> {
+    let conn = db.conn.lock().unwrap();
+    let profiles = db::list_sync_profiles(&conn).map_err(|e| e.to_string())?;
+    Ok(profiles
+        .into_iter()
+        .map(|p| LanProfileView {
+            id: p.id,
+            group: p.share_group,
+            mode: p.mode,
+            is_active: p.is_active,
+            has_key: true,
+        })
+        .collect())
+}
+
+/// 新建共享配置（密钥经内部密钥包装为 wrapped_key 落库，不裸存）。
+/// `activate=true` 时同时激活并重启发现。
+#[tauri::command]
+pub async fn lan_upsert_profile(
+    state: State<'_, LanManager>,
+    db: State<'_, DbState>,
+    group: String,
+    key: String,
+    name: String,
+    activate: bool,
+) -> Result<(), String> {
+    let id = Uuid::new_v4().to_string();
+    let wrapped = wrap_profile_key(&db, &key).ok_or("key wrap failed")?;
+    let created = now_ms();
+    {
+        let conn = db.conn.lock().unwrap();
+        db::upsert_sync_profile(&conn, &id, "lan", &group, &wrapped, activate, created)
+            .map_err(|e| e.to_string())?;
+        if activate {
+            db::set_active_profile(&conn, &id).map_err(|e| e.to_string())?;
+        }
+    }
+    if activate {
+        let plaintext = unwrap_profile_key(&db, &wrapped).ok_or("key unwrap failed")?;
+        let mut cfg = state.config().await;
+        cfg.share_group = group;
+        cfg.share_key = plaintext;
+        cfg.device_name = name;
+        state.set_config(cfg).await;
+    }
+    Ok(())
+}
+
+/// 激活某共享配置：载入明文密钥并重启发现。
+#[tauri::command]
+pub async fn lan_set_active_profile(
+    state: State<'_, LanManager>,
+    db: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let (wrapped, group) = {
+        let conn = db.conn.lock().unwrap();
+        db::set_active_profile(&conn, &id).map_err(|e| e.to_string())?;
+        db::get_profile_creds(&conn, &id).map_err(|e| e.to_string())?
+    };
+    let plaintext = unwrap_profile_key(&db, &wrapped).ok_or("key unwrap failed")?;
+    let mut cfg = state.config().await;
+    cfg.share_group = group;
+    cfg.share_key = plaintext;
+    state.set_config(cfg).await;
+    Ok(())
+}
+
+/// 删除共享配置；若删除的是激活项，停止发现并复位为未配置。
+#[tauri::command]
+pub async fn lan_delete_profile(
+    state: State<'_, LanManager>,
+    db: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let was_active = {
+        let conn = db.conn.lock().unwrap();
+        let active = db::is_profile_active(&conn, &id);
+        db::delete_sync_profile(&conn, &id).map_err(|e| e.to_string())?;
+        active
+    };
+    if was_active {
+        state.stop().await;
+        let mut cfg = state.config().await;
+        cfg.share_group = String::new();
+        cfg.share_key = String::new();
+        cfg.share_out = false;
+        state.set_config(cfg).await;
+    }
+    Ok(())
+}
+
+/// 切换发布开关（share_out）。
+#[tauri::command]
+pub async fn lan_set_share_out(state: State<'_, LanManager>, enabled: bool) -> Result<(), String> {
+    state.set_share_out(enabled).await;
+    Ok(())
+}
+
+/// 内部：用内部数据库密钥加密共享密钥（包装为 wrapped_key 落库）。
+fn wrap_profile_key(db: &DbState, plain: &str) -> Option<String> {
+    let key = db.key.lock().unwrap();
+    let k = key.as_ref()?;
+    let sealed = crypto::encrypt(k, plain.as_bytes());
+    Some(STANDARD.encode(sealed))
+}
+
+/// 内部：解开 wrapped_key 还原明文共享密钥。
+fn unwrap_profile_key(db: &DbState, wrapped: &str) -> Option<String> {
+    let sealed = STANDARD.decode(wrapped).ok()?;
+    let key = db.key.lock().unwrap();
+    let k = key.as_ref()?;
+    let plain = crypto::decrypt(k, &sealed)?;
+    String::from_utf8(plain).ok()
 }

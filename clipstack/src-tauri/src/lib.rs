@@ -9,6 +9,7 @@ mod crypto;
 mod db;
 mod i18n;
 mod keychain;
+mod lan;
 mod models;
 mod tray;
 
@@ -23,6 +24,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use clipboard::MonitorState;
 use db::{AppDb, DbState};
+use lan::LanManager;
 
 /// macOS：以「配件（Accessory）」模式运行 —— 不在 Dock 显示图标、不成为前台应用（仅托盘常驻）。
 /// 窗口关闭收进托盘时使用，满足「未打开界面时不显示 Dock 图标」。
@@ -146,6 +148,14 @@ pub fn run() {
             let app_state = AppState::new();
             app_state.set_locked(false);
             app.manage(app_state.clone());
+
+            // 局域网共享管理器（L2/L3）：启动 mDNS 发现 + mesh 监听。
+            // 配置缺省（组/密钥空，share_out 关闭）；用户在前端设置后通过 lan_set_config 重启。
+            let lan = LanManager::new(app.handle().clone(), db_state.clone());
+            app.manage(lan.clone());
+            tauri::async_runtime::spawn(async move {
+                lan.start().await;
+            });
 
             // 首次运行判定与窗口显隐：在 setup 阶段同步完成，确保窗口在事件循环启动前就已显示，
             // 避免原先「前端异步加载后再 show」带来的时机过晚与 macOS 激活策略抖动（窗口失焦沉底）。
@@ -405,6 +415,16 @@ pub fn run() {
             commands::purge_expired,
             // ===== Touch ID 可用性检测 =====
             commands::check_touch_id_available,
+            // ===== 局域网共享（L2/L3）=====
+            commands::lan_set_config,
+            commands::lan_send_test,
+            commands::lan_get_peers,
+            commands::lan_get_config,
+            commands::lan_list_profiles,
+            commands::lan_upsert_profile,
+            commands::lan_set_active_profile,
+            commands::lan_delete_profile,
+            commands::lan_set_share_out,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipStack");

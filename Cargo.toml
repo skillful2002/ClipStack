@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "clipstack-protocol",
+    "clipstack/src-tauri",
+]
+
+# 发布优化（原位于 src-tauri/Cargo.toml，纳入 workspace 后须置于根以生效）。
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1135,6 +1135,90 @@
   transform: translateX(20px);
 }
 
+/* ===== L4 · 局域网共享设置面板 ===== */
+.settings-row-column {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.settings-row-column > span {
+  color: var(--cs-text-secondary);
+  font-size: 13px;
+}
+
+.lan-peers {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  font-size: 13px;
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  outline: none;
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+}
+
+.lan-peers:focus {
+  border-color: var(--cs-accent);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0 4px;
+}
+
+.settings-actions button {
+  padding: 8px 18px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.settings-actions button.primary {
+  border: none;
+  background: var(--cs-accent-strong, var(--cs-accent, #4c6ef5));
+  color: #fff;
+}
+
+.settings-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lan-subtitle {
+  margin-top: 14px;
+}
+
+.lan-device-id {
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12px;
+  background: var(--cs-bg-alt, rgba(127, 127, 127, 0.12));
+  padding: 1px 6px;
+  border-radius: 6px;
+  user-select: all;
+}
+
+.lan-peer-addr {
+  color: var(--cs-muted, #888);
+  font-size: 12px;
+}
+
+.lan-peer-status {
+  color: var(--cs-muted, #888);
+  font-size: 12px;
+}
+
+.lan-peer-status.on {
+  color: #2f9e44;
+}
+
 /* ===== P0 · 锁屏遮罩与安全设置 ===== */
 .lock-gate {
   position: fixed;
@@ -1275,6 +1359,20 @@
   color: #d6336c;
   background: rgba(214, 51, 108, 0.12);
   border: 1px solid rgba(214, 51, 108, 0.35);
+}
+
+/* L4 · 局域网共享来源徽标（列表行） */
+.item-remote-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+  border-radius: 6px;
+  color: #1971c2;
+  background: rgba(25, 113, 194, 0.12);
+  border: 1px solid rgba(25, 113, 194, 0.35);
 }
 
 .sensitive-masked {

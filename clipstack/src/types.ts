@@ -20,6 +20,10 @@ export interface HistoryItem {
   isFavorite: boolean;
   /** 毫秒时间戳。 */
   createdAt: number;
+  /** 来源设备名：本地捕获为空字符串；来自局域网共享的对端条目填对端设备名。 */
+  originDevice?: string;
+  /** 是否来自局域网共享（对端设备）；本地捕获为 false / undefined。 */
+  isRemote?: boolean;
   /** 删除时间（仅回收站条目有值，主列表为 undefined）。 */
   deletedAt?: number;
 }

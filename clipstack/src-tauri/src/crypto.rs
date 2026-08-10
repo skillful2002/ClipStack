@@ -16,11 +16,14 @@ use aes_gcm::{
 };
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
+use hmac::Hmac;
+use pbkdf2::pbkdf2;
 use rand::RngCore;
+use sha2::{Digest, Sha256};
 use zeroize::ZeroizeOnDrop;
 
 /// 32 字节主密钥。派生于主密码；内存中持有，drop 时自动清零。
-#[derive(ZeroizeOnDrop)]
+#[derive(Clone, ZeroizeOnDrop)]
 pub struct Key(pub [u8; 32]);
 
 impl fmt::Debug for Key {
@@ -88,6 +91,44 @@ pub fn decrypt(key: &Key, sealed: &[u8]) -> Option<Vec<u8>> {
     cipher.decrypt(Nonce::from_slice(nonce), ct).ok()
 }
 
+// ===== 局域网共享：PSK 派生（替换全量设计的 ECDH） =====
+//
+// 设计（见 `clipstack-lan-sync-design.md` §六）：对称密钥由「共享组 + 密钥」派生，
+// `sym_key = PBKDF2-HMAC-SHA256(share_key, salt = SHA256(share_group), rounds = 100_000)`。
+// 与内部数据库密钥（`Key`）共用同一封装，drop 时自动清零。
+
+/// 分组匹配指纹：仅广播前 8 字节，绝不泄露密钥原文（设计 §3.3）。
+pub fn group_fingerprint(share_group: &str, share_key: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(share_group.as_bytes());
+    h.update("::".as_bytes());
+    h.update(share_key.as_bytes());
+    let digest = h.finalize();
+    digest[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// 由「共享组 + 密钥」派生对称密钥（PSK）。
+pub fn derive_psk(share_group: &str, share_key: &str) -> Key {
+    let salt = sha256(share_group.as_bytes());
+    let mut out = [0u8; 32];
+    pbkdf2::<Hmac<Sha256>>(share_key.as_bytes(), &salt, 100_000, &mut out)
+        .expect("pbkdf2 derivation failed");
+    Key(out)
+}
+
+/// 内部：返回 SHA256 原始 32 字节（作 PBKDF2 salt）。
+fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(data);
+    let d = h.finalize();
+    let mut buf = [0u8; 32];
+    buf.copy_from_slice(&d);
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +165,31 @@ mod tests {
         let key = Key([0u8; 32]);
         assert_eq!(key.0.len(), 32);
         drop(key);
+    }
+
+    #[test]
+    fn group_fingerprint_consistent_and_secret() {
+        let fp1 = group_fingerprint("home", "s3cret");
+        let fp2 = group_fingerprint("home", "s3cret");
+        let fp3 = group_fingerprint("home", "other");
+        let fp4 = group_fingerprint("office", "s3cret");
+        assert_eq!(fp1, fp2);
+        assert_ne!(fp1, fp3); // 密钥不同 -> 指纹不同
+        assert_ne!(fp1, fp4); // 组不同 -> 指纹不同
+        assert_eq!(fp1.len(), 16); // 8 字节十六进制
+        assert!(!fp1.contains("s3cret")); // 不含密钥原文
+    }
+
+    #[test]
+    fn psk_derivation_roundtrip() {
+        let k1 = derive_psk("home", "s3cret");
+        let k2 = derive_psk("home", "s3cret");
+        let k3 = derive_psk("home", "wrong");
+        assert_eq!(k1.0, k2.0);
+        assert_ne!(k1.0, k3.0);
+        // 派生密钥可加解密
+        let sealed = encrypt(&k1, b"lan payload");
+        assert_eq!(decrypt(&k2, &sealed).unwrap(), b"lan payload");
+        assert!(decrypt(&k3, &sealed).is_none());
     }
 }

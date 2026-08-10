@@ -18,11 +18,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use zeroize::Zeroize;
 
 use crate::crypto::Key;
 use crate::db::{self, AppDb, DbState, now_ms, SENSITIVE_MASK};
+use crate::lan::LanManager;
 use crate::models::{ContentType, HistoryItem, NewItem};
 
 /// 去重时间窗：同一 hash 在此窗口内再次出现视为重复，不再广播 / 入库。
@@ -109,6 +110,16 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
                     last_count = count;
                     if let Some(item) = capture(&db, &state) {
                         let _ = app.emit("clipboard-changed", &item);
+                        // L3 · 局域网共享：本地捕获成功后（若已开启 share_out）广播给 mesh 对端。
+                        // 仅在「真实 OS 剪贴板变更」分支触发，对端写入不重复触发，避免回环放大。
+                        if let Some(lan) = app.try_state::<LanManager>() {
+                            let mgr = lan.inner().clone();
+                            let ct = item.content_type.as_str().to_string();
+                            let txt = item.content_text.clone();
+                            tauri::async_runtime::spawn(async move {
+                                mgr.broadcast_local(&ct, &txt).await;
+                            });
+                        }
                         println!(
                             "[clipstack] captured {:?} id={} hash={} source={} size={}",
                             item.content_type, item.id, item.hash, item.source_app, item.size_bytes
@@ -242,6 +253,8 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         is_favorite,
         is_sensitive,
         created_at: timestamp,
+        origin_device: String::new(),
+        is_remote: false,
         deleted_at: None,
     })
 }

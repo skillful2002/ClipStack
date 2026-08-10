@@ -182,3 +182,84 @@ export const onAppLockChanged = (
 /** 立即按 retention_days 清理超期历史（未置顶）与回收站内容，返回删除条数。 */
 export const purgeExpired = (): Promise<number> =>
   invoke<number>("purge_expired");
+
+// ===== 局域网共享（L2/L3/L4，见 docs/clipstack-lan-sync-design.md）=====
+
+/** 局域网共享配置视图（不含明文密钥）。 */
+export interface LanConfigView {
+  deviceId: string;
+  group: string;
+  name: string;
+  shareOut: boolean;
+  fileLimitMb: number;
+  hasKey: boolean;
+  manualPeers: string[];
+}
+
+/** 组内在线设备。 */
+export interface PeerInfo {
+  deviceId: string;
+  name: string;
+  addr: string;
+  connected: boolean;
+}
+
+/** 读取当前局域网配置（不含明文密钥）。 */
+export const lanGetConfig = (): Promise<LanConfigView> =>
+  invoke<LanConfigView>("lan_get_config");
+
+/** 设置局域网共享配置并重启发现（组/密钥变更会重新注册 mDNS 指纹）。 */
+export const lanSetConfig = (cfg: {
+  group: string;
+  key: string;
+  name: string;
+  shareOut: boolean;
+  fileLimitMb: number;
+  manualPeers: string[];
+}): Promise<void> =>
+  invoke<void>("lan_set_config", {
+    group: cfg.group,
+    key: cfg.key,
+    name: cfg.name,
+    shareOut: cfg.shareOut,
+    fileLimitMb: cfg.fileLimitMb,
+    manualPeers: cfg.manualPeers,
+  });
+
+/** 切换发布开关（share_out）。 */
+export const lanSetShareOut = (enabled: boolean): Promise<void> =>
+  invoke<void>("lan_set_share_out", { enabled });
+
+/** 向组内所有已连对端广播一条测试文本，返回实际送达的对端数。 */
+export const lanSendTest = (text: string): Promise<number> =>
+  invoke<number>("lan_send_test", { text });
+
+/** 当前组内在线设备列表。 */
+export const lanGetPeers = (): Promise<PeerInfo[]> =>
+  invoke<PeerInfo[]>("lan_get_peers");
+
+/** 订阅对端上线事件，返回取消订阅函数。 */
+export const onLanPeerOnline = (
+  cb: (peer: PeerInfo) => void,
+): Promise<UnlistenFn> =>
+  listen<PeerInfo>("lan-peer-online", (event) => cb(event.payload));
+
+/** 订阅对端下线事件，返回取消订阅函数。 */
+export const onLanPeerOffline = (
+  cb: (peer: PeerInfo) => void,
+): Promise<UnlistenFn> =>
+  listen<PeerInfo>("lan-peer-offline", (event) => cb(event.payload));
+
+/** 收到共享剪贴板条目的事件载荷。 */
+export interface ReceivedClipPayload {
+  syncId: string;
+  originDevice: string;
+}
+
+/** 订阅收到共享剪贴板事件，返回取消订阅函数。 */
+export const onLanClipboardReceived = (
+  cb: (payload: ReceivedClipPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<ReceivedClipPayload>("lan-clipboard-received", (event) =>
+    cb(event.payload),
+  );

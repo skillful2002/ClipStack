@@ -30,6 +30,17 @@ clipboard-win = "5"                  # 直接读 arboard 3.x 未覆盖的 CF_BIT
 tauri-plugin-global-shortcut = "2"  # P4 全局快捷键（唤起主界面）
 tauri-plugin-autostart = "2"        # P6 开机自启开关
 
+# ===== 局域网共享（L2/L3，见 clipstack-lan-sync-design.md）=====
+clipstack-protocol = { path = "../../clipstack-protocol" }  # 共享协议库
+mdns-sd = "0.20"                  # 纯 Rust mDNS 发现（不依赖系统 Bonjour/Avahi）
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokio-tungstenite = "0.29"        # WebSocket（mesh 直连传输）
+futures-util = "0.3"              # WS 流处理
+pbkdf2 = "0.12"                   # PSK 派生
+hmac = "0.12"                     # PBKDF2 的 HMAC 后端
+sha2 = "0.10"                     # SHA256（指纹 / salt）
+uuid = { version = "1", features = ["v4"] }  # 设备 id / sync_id 生成
+
 # macOS 专用：读取 NSPasteboard.changeCount 做变更检测，读取来源应用名（NSWorkspace.frontmostApplication）
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -37,9 +48,3 @@ objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSWorkspace", "N
 security-framework = "2"          # 内部数据库加密密钥的钥匙串持久化（clipstack.enc，无生物识别保护）
 security-framework-sys = "2"      # 提供 kSec* 常量与 SecItemAdd 等底层符号（与 security-framework 同主版本）
 core-foundation = "0.9"           # security-framework 的 CF 对象类型（CFDictionary/CFData/CFString 等）
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true

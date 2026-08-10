@@ -7,6 +7,7 @@ import { applyTheme, type Theme } from "../lib/theme";
 import { SecuritySettings } from "./SecuritySettings";
 import { SaveTypesSettings } from "./SaveTypesSettings";
 import { RetentionSettings } from "./RetentionSettings";
+import { LanSettings } from "./LanSettings";
 import { useHistory } from "../store/history";
 import { useT, useI18nStore, LANGUAGE_OPTIONS, type Language } from "../lib/i18n";
 
@@ -337,6 +338,8 @@ export function SettingsView() {
       </div>
 
       <SecuritySettings />
+
+      <LanSettings />
     </section>
   );
 }

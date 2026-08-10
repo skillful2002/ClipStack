@@ -62,6 +62,13 @@ pub struct HistoryItem {
     pub is_sensitive: bool,
     /// 毫秒时间戳。
     pub created_at: i64,
+    /// 来源设备名：本地捕获为空字符串；来自局域网共享的对端条目填对端设备名。
+    /// 用于历史列表标注「本机 / 某设备」，便于区分共享内容来源。
+    #[serde(default)]
+    pub origin_device: String,
+    /// 是否来自局域网共享（对端设备）；本地捕获为 false。
+    #[serde(default)]
+    pub is_remote: bool,
     /// 删除时间（仅回收站条目有值；主列表为 None，以便同一结构体复用）。
     #[serde(default)]
     pub deleted_at: Option<i64>,

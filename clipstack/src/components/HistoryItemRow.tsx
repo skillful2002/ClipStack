@@ -39,7 +39,16 @@ export function HistoryItemRow({
       <div className="item-main">
         <div className="item-preview">{item.preview || t("item.emptyContent")}</div>
         <div className="item-sub">
-          <span className="item-app">{item.sourceApp || t("item.unknownSource")}</span>
+          {item.isRemote ? (
+            <span
+              className="item-remote-badge"
+              title={t("lan.receivedFrom", { name: item.originDevice ?? "" })}
+            >
+              {t("lan.title")} · {item.originDevice || t("item.local")}
+            </span>
+          ) : (
+            <span className="item-app">{item.sourceApp || t("item.unknownSource")}</span>
+          )}
           <span className="item-dot">·</span>
           <span>{relativeTime(item.createdAt)}</span>
         </div>

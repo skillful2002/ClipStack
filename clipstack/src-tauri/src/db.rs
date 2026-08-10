@@ -119,6 +119,7 @@ pub fn open(app: &AppHandle) -> Result<AppDb, Box<dyn std::error::Error>> {
     let path = dir.join("clipstack.db");
     let conn = Connection::open(&path)?;
     migrate(&conn)?;
+    migrate_lan(&conn)?;
     // 一次性迁移：纠正早期被误判为「文本」的文件条目（见函数注释）。
     let _ = migrate_files_from_text(&conn);
     Ok(AppDb {
@@ -199,7 +200,196 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // 全新库因上方 CREATE TABLE 已含该列，此处为 no-op。
     add_column_if_missing(conn, "history", "is_sensitive", "INTEGER NOT NULL DEFAULT 0")?;
     add_column_if_missing(conn, "trash", "is_sensitive", "INTEGER NOT NULL DEFAULT 0")?;
+    // L4 · 来源标识列：本地捕获为空、共享条目填对端设备名。幂等补列，使 `get_history`
+    // 等统一 SELECT 在旧库（仅 migrate）与新库均可用。
+    add_column_if_missing(conn, "history", "origin_device", "TEXT NOT NULL DEFAULT ''")?;
+    add_column_if_missing(conn, "history", "is_remote", "INTEGER NOT NULL DEFAULT 0")?;
+    // 回收站同样返回 HistoryItem（含来源标识），故 trash 也补这两列（共享条目一般不进回收站，恒为本地）。
+    add_column_if_missing(conn, "trash", "origin_device", "TEXT NOT NULL DEFAULT ''")?;
+    add_column_if_missing(conn, "trash", "is_remote", "INTEGER NOT NULL DEFAULT 0")?;
     Ok(())
+}
+
+/// L3 · 局域网共享：新建 `sync_profiles` 表与 `history` 增量列（幂等）。
+///
+/// 设计文档假设该表已存在并写「ALTER TABLE sync_profiles ADD ...」；
+/// 实际代码库此前并无此表，故此处用 `CREATE TABLE IF NOT EXISTS` 负责创建，
+/// 其余 `history` 增量列沿用 `add_column_if_missing` 兼容旧库升级。
+pub fn migrate_lan(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS sync_profiles (
+            id          TEXT PRIMARY KEY,
+            mode        TEXT NOT NULL DEFAULT 'lan',   -- 'lan' | 'relay'
+            share_group TEXT,
+            wrapped_key TEXT,                           -- 经钥匙串包装的 share_key，不裸存
+            is_active   INTEGER NOT NULL DEFAULT 0,     -- 多配置单激活，互斥
+            created_at  INTEGER NOT NULL
+        );
+        "#,
+    )?;
+    add_column_if_missing(conn, "history", "sync_id", "TEXT")?;
+    add_column_if_missing(conn, "history", "origin_device", "TEXT")?;
+    add_column_if_missing(conn, "history", "lamport", "INTEGER")?;
+    add_column_if_missing(conn, "history", "profile_id", "TEXT")?;
+    add_column_if_missing(conn, "history", "is_remote", "INTEGER")?; // 1=来自共享，不触发回环
+    Ok(())
+}
+
+/// L3 · `sync_profiles` 行视图（不含敏感性字段 `wrapped_key`）。
+#[derive(Debug, Clone)]
+pub struct SyncProfile {
+    pub id: String,
+    pub mode: String,
+    pub share_group: String,
+    pub is_active: bool,
+    #[allow(dead_code)]
+    pub created_at: i64,
+}
+
+/// L3 · 列出全部共享配置（按创建时间升序）。
+pub fn list_sync_profiles(conn: &Connection) -> rusqlite::Result<Vec<SyncProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, mode, share_group, is_active, created_at FROM sync_profiles ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(SyncProfile {
+            id: r.get(0)?,
+            mode: r.get(1)?,
+            share_group: r.get(2)?,
+            is_active: r.get::<_, i64>(3)? != 0,
+            created_at: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// L3 · 新建或更新共享配置（按 id 幂等）。
+pub fn upsert_sync_profile(
+    conn: &Connection,
+    id: &str,
+    mode: &str,
+    share_group: &str,
+    wrapped_key: &str,
+    is_active: bool,
+    created_at: i64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO sync_profiles (id, mode, share_group, wrapped_key, is_active, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(id) DO UPDATE SET \
+            mode=excluded.mode, share_group=excluded.share_group, \
+            wrapped_key=excluded.wrapped_key, is_active=excluded.is_active",
+        params![id, mode, share_group, wrapped_key, is_active as i64, created_at],
+    )?;
+    Ok(())
+}
+
+/// L3 · 激活某配置：先全部置 0，再置该 id 为 1（多配置单激活，互斥）。
+pub fn set_active_profile(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE sync_profiles SET is_active = 0", [])?;
+    conn.execute("UPDATE sync_profiles SET is_active = 1 WHERE id = ?", [id])?;
+    Ok(())
+}
+
+/// L3 · 删除共享配置。
+pub fn delete_sync_profile(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM sync_profiles WHERE id = ?", [id])?;
+    Ok(())
+}
+
+/// L3 · 当前激活的共享配置（如有）。
+#[allow(dead_code)]
+pub fn get_active_profile(conn: &Connection) -> rusqlite::Result<Option<SyncProfile>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, mode, share_group, is_active, created_at FROM sync_profiles WHERE is_active = 1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map([], |r| {
+        Ok(SyncProfile {
+            id: r.get(0)?,
+            mode: r.get(1)?,
+            share_group: r.get(2)?,
+            is_active: r.get::<_, i64>(3)? != 0,
+            created_at: r.get(4)?,
+        })
+    })?;
+    rows.next().transpose()
+}
+
+/// L3 · 读取某配置的（wrapped_key, share_group），用于激活时还原明文密钥。
+pub fn get_profile_creds(conn: &Connection, id: &str) -> rusqlite::Result<(String, String)> {
+    conn.query_row(
+        "SELECT wrapped_key, share_group FROM sync_profiles WHERE id = ?",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+}
+
+/// L3 · 某配置是否当前激活。
+pub fn is_profile_active(conn: &Connection, id: &str) -> bool {
+    conn.query_row(
+        "SELECT is_active FROM sync_profiles WHERE id = ?",
+        [id],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+        != 0
+}
+
+/// L3 · 写入来自共享的对端条目（`is_remote=1`）所需的全部入参。
+/// 抽为结构体以满足 `clippy::too_many_arguments`，同时让调用点更可读。
+pub struct RemoteClipInput<'a> {
+    pub key: Option<&'a Key>,
+    pub content_type: &'a str,
+    pub content_text: &'a str,
+    pub content_blob: Option<&'a [u8]>,
+    pub source_app: &'a str,
+    pub size_bytes: i64,
+    pub hash: &'a str,
+    pub is_sensitive: bool,
+    pub origin_device: &'a str,
+    pub sync_id: &'a str,
+    pub lamport: i64,
+    pub profile_id: &'a str,
+}
+
+/// L3 · 写入来自共享的对端条目（`is_remote=1`）。按 `sync_id` 去重，已存在则跳过。
+/// 返回新插入行 id（跳过时为 `None`）。内容沿用内部密钥加密，与本地捕获一致。
+pub fn insert_remote_clip(conn: &Connection, input: RemoteClipInput<'_>) -> rusqlite::Result<Option<i64>> {
+    if conn
+        .query_row(
+            "SELECT id FROM history WHERE sync_id = ?",
+            [input.sync_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .is_ok()
+    {
+        return Ok(None); // 已存在，跳过（去重）
+    }
+    let sealed_text = seal_text(input.key, input.content_text);
+    let sealed_blob = seal_blob(input.key, input.content_blob);
+    conn.execute(
+        "INSERT INTO history \
+         (content_type, content_text, content_blob, source_app, size_bytes, hash, \
+          is_pinned, is_favorite, is_sensitive, created_at, sync_id, origin_device, lamport, profile_id, is_remote) \
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 1)",
+        params![
+            input.content_type,
+            sealed_text,
+            sealed_blob,
+            input.source_app,
+            input.size_bytes,
+            input.hash,
+            input.is_sensitive as i64,
+            now_ms(),
+            input.sync_id,
+            input.origin_device,
+            input.lamport,
+            input.profile_id,
+        ],
+    )?;
+    let _ = enforce_capacity(conn, MAX_HISTORY);
+    Ok(Some(conn.last_insert_rowid()))
 }
 
 /// 新增或去重置顶：同 hash 已在 history 中 → 更新 created_at 等并置顶返回原 id；
@@ -263,7 +453,7 @@ pub fn get_history(
         "created_at DESC"
     };
     let sql = format!(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at, origin_device, is_remote \
          FROM history ORDER BY {order} LIMIT ?"
     );
     // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
@@ -285,6 +475,8 @@ pub fn get_history(
             is_favorite: r.get::<_, i64>(7)? != 0,
             is_sensitive: sensitive,
             created_at: r.get(9)?,
+            origin_device: r.get(10)?,
+            is_remote: r.get::<_, i64>(11)? != 0,
             deleted_at: None,
         })
     })?;
@@ -299,7 +491,7 @@ pub fn get_recent_tray(
     limit: i64,
 ) -> rusqlite::Result<Vec<HistoryItem>> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at, origin_device, is_remote \
          FROM history WHERE content_type != 'file' ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
     )?;
     // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
@@ -320,6 +512,8 @@ pub fn get_recent_tray(
             is_favorite: r.get::<_, i64>(7)? != 0,
             is_sensitive: sensitive,
             created_at: r.get(9)?,
+            origin_device: r.get(10)?,
+            is_remote: r.get::<_, i64>(11)? != 0,
             deleted_at: None,
         })
     })?;
@@ -329,7 +523,7 @@ pub fn get_recent_tray(
 /// 按 id 读取单条历史（托盘点击复制、命令读取原文等场景）。
 pub fn get_item(conn: &Connection, key: Option<&Key>, id: i64) -> rusqlite::Result<HistoryItem> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at, origin_device, is_remote \
          FROM history WHERE id = ?",
     )?;
     // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
@@ -350,6 +544,8 @@ pub fn get_item(conn: &Connection, key: Option<&Key>, id: i64) -> rusqlite::Resu
             is_favorite: r.get::<_, i64>(7)? != 0,
             is_sensitive: sensitive,
             created_at: r.get(9)?,
+            origin_device: r.get(10)?,
+            is_remote: r.get::<_, i64>(11)? != 0,
             deleted_at: None,
         })
     })
@@ -392,7 +588,7 @@ pub fn delete_items(conn: &mut Connection, ids: &[i64]) -> rusqlite::Result<usiz
 }
 pub fn get_trash(conn: &Connection, key: Option<&Key>) -> rusqlite::Result<Vec<HistoryItem>> {
     let mut stmt = conn.prepare(
-        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive \
+        "SELECT id, content_type, content_text, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive, origin_device, is_remote \
          FROM trash ORDER BY deleted_at DESC",
     )?;
     // 读取时实时读取「掩码敏感内容」开关，使开关切换对所有（含历史）条目立即生效。
@@ -413,6 +609,8 @@ pub fn get_trash(conn: &Connection, key: Option<&Key>) -> rusqlite::Result<Vec<H
             is_favorite: r.get::<_, i64>(7)? != 0,
             is_sensitive: sensitive,
             created_at: r.get(8)?,
+            origin_device: r.get(11)?,
+            is_remote: r.get::<_, i64>(12)? != 0,
             deleted_at: Some(r.get(9)?),
         })
     })?;
@@ -1357,5 +1555,125 @@ mod tests {
 
         // days<=0 不删除
         assert_eq!(purge_expired(&c, 0).unwrap(), 0);
+    }
+
+    // ===== L3 · 局域网共享 DB 层 =====
+
+    /// L3 · 内存库（含 sync_profiles 表与 history 增量列），供共享相关单测使用。
+    fn mem_db_lan() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        migrate(&c).unwrap();
+        migrate_lan(&c).unwrap();
+        c
+    }
+
+    fn remote_input<'a>(
+        content_text: &'a str,
+        hash: &'a str,
+        sync_id: &'a str,
+        origin: &'a str,
+        lamport: i64,
+        profile_id: &'a str,
+    ) -> RemoteClipInput<'a> {
+        RemoteClipInput {
+            key: None,
+            content_type: "text",
+            content_text,
+            content_blob: None,
+            source_app: origin,
+            size_bytes: 10,
+            hash,
+            is_sensitive: false,
+            origin_device: origin,
+            sync_id,
+            lamport,
+            profile_id,
+        }
+    }
+
+    #[test]
+    fn remote_clip_inserts_and_dedups_by_sync_id() {
+        let c = mem_db_lan();
+        let id1 = insert_remote_clip(&c, remote_input("remote-h1", "h1", "sync-1", "peer-A", 3, "p1"))
+            .unwrap();
+        assert!(id1.is_some(), "首条应插入");
+        // 相同 sync_id → 去重跳过，返回 None。
+        let id2 = insert_remote_clip(&c, remote_input("remote-h1", "h1", "sync-1", "peer-A", 3, "p1"))
+            .unwrap();
+        assert!(id2.is_none(), "同 sync_id 应跳过");
+        // 不同 sync_id → 再次插入。
+        let id3 = insert_remote_clip(&c, remote_input("remote-h2", "h2", "sync-2", "peer-A", 4, "p1"))
+            .unwrap();
+        assert!(id3.is_some());
+        let count: i64 = c
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2, "去重后仅 2 行");
+    }
+
+    #[test]
+    fn remote_clip_marks_is_remote_and_origin() {
+        let c = mem_db_lan();
+        insert_remote_clip(&c, remote_input("remote-h1", "h1", "sync-1", "peer-A", 7, "p1")).unwrap();
+        let row: (String, String, i64, i64) = c
+            .query_row(
+                "SELECT origin_device, profile_id, lamport, is_remote FROM history WHERE sync_id = 'sync-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "peer-A");
+        assert_eq!(row.1, "p1");
+        assert_eq!(row.2, 7);
+        assert_eq!(row.3, 1, "is_remote 应为 1");
+    }
+
+    #[test]
+    fn get_history_exposes_remote_origin() {
+        let c = mem_db_lan();
+        insert_remote_clip(&c, remote_input("remote-h1", "h1", "sync-1", "peer-A", 7, "p1")).unwrap();
+        let items = get_history(&c, None, 100, true).unwrap();
+        assert_eq!(items.len(), 1);
+        let it = &items[0];
+        assert!(it.is_remote, "共享条目 is_remote 应为 true");
+        assert_eq!(it.origin_device, "peer-A", "应暴露来源设备名");
+    }
+
+    #[test]
+    fn sync_profiles_crud_and_single_active() {
+        let c = mem_db_lan();
+        upsert_sync_profile(&c, "p1", "lan", "team", "WKEY1", true, 100).unwrap();
+        upsert_sync_profile(&c, "p2", "lan", "home", "WKEY2", false, 200).unwrap();
+        // 列表已包含两个配置。
+        let list = list_sync_profiles(&c).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, "p1");
+        // 单激活互斥：激活 p2 后 p1 失活。
+        set_active_profile(&c, "p2").unwrap();
+        assert!(!is_profile_active(&c, "p1"));
+        assert!(is_profile_active(&c, "p2"));
+        let active = get_active_profile(&c).unwrap().unwrap();
+        assert_eq!(active.id, "p2");
+        // 凭证读取（wrapped_key 不对外暴露，但内部可还原）。
+        let (wkey, grp) = get_profile_creds(&c, "p2").unwrap();
+        assert_eq!(wkey, "WKEY2");
+        assert_eq!(grp, "home");
+        // 删除 p2。
+        delete_sync_profile(&c, "p2").unwrap();
+        assert!(!is_profile_active(&c, "p2"));
+        assert_eq!(list_sync_profiles(&c).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn upsert_sync_profile_is_idempotent() {
+        let c = mem_db_lan();
+        upsert_sync_profile(&c, "p1", "lan", "team", "WKEY1", true, 100).unwrap();
+        // 同 id 更新 group/key，不新增行。
+        upsert_sync_profile(&c, "p1", "lan", "team2", "WKEYX", false, 100).unwrap();
+        let list = list_sync_profiles(&c).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].share_group, "team2");
+        // id 不在视图中暴露 wrapped_key；需用 creds 校验。
+        assert_eq!(get_profile_creds(&c, "p1").unwrap().0, "WKEYX");
     }
 }
