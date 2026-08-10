@@ -647,9 +647,52 @@
 /* ===== 设置 / 回收站 ===== */
 .settings-pane {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 24px 32px;
   background: var(--cs-bg);
+  overflow: hidden;
+}
+
+/* 标题与标签栏固定，不随内容滚动；仅内容区在标签栏之内滚动。 */
+.settings-title,
+.settings-tabs {
+  flex-shrink: 0;
+}
+
+.settings-tab-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 4px;
+  padding-bottom: 8px;
+  /* Firefox：细滚动条 + 用 Token 着色（thumb/轨道随主题切换）。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--cs-text-tertiary) transparent;
+}
+
+/* WebKit：收窄至约 10px（默认约 17px），颜色随主题。
+ * 轨道透明融入背景；thumb 用次要文字色，hover 用强调色。 */
+.settings-tab-content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.settings-tab-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-tab-content::-webkit-scrollbar-thumb {
+  background: var(--cs-text-tertiary);
+  border-radius: 999px;
+  /* 用透明边让 thumb 视觉更窄、不与内容贴边。 */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.settings-tab-content::-webkit-scrollbar-thumb:hover {
+  background: var(--cs-accent);
+  background-clip: content-box;
 }
 
 .settings-title {

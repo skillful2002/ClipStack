@@ -77,6 +77,9 @@ const zhCN: Dict = {
   "trashDetail.metaDeletedAt": "删除时间",
 
   "settings.title": "设置",
+  "settings.tabGeneral": "通用",
+  "settings.tabSecurity": "安全",
+  "settings.tabSharing": "共享",
   "settings.appearance": "外观",
   "settings.theme": "主题",
   "settings.language": "语言",
@@ -335,6 +338,9 @@ const zhTW: Dict = {
   "trashDetail.metaDeletedAt": "刪除時間",
 
   "settings.title": "設定",
+  "settings.tabGeneral": "一般",
+  "settings.tabSecurity": "安全",
+  "settings.tabSharing": "共用",
   "settings.appearance": "外觀",
   "settings.theme": "主題",
   "settings.language": "語言",
@@ -593,6 +599,9 @@ const en: Dict = {
   "trashDetail.metaDeletedAt": "Deleted",
 
   "settings.title": "Settings",
+  "settings.tabGeneral": "General",
+  "settings.tabSecurity": "Security",
+  "settings.tabSharing": "Sharing",
   "settings.appearance": "Appearance",
   "settings.theme": "Theme",
   "settings.language": "Language",
@@ -851,6 +860,9 @@ const ja: Dict = {
   "trashDetail.metaDeletedAt": "削除日時",
 
   "settings.title": "設定",
+  "settings.tabGeneral": "一般",
+  "settings.tabSecurity": "セキュリティ",
+  "settings.tabSharing": "共有",
   "settings.appearance": "外観",
   "settings.theme": "テーマ",
   "settings.language": "言語",
@@ -1109,6 +1121,9 @@ const de: Dict = {
   "trashDetail.metaDeletedAt": "Gelöscht",
 
   "settings.title": "Einstellungen",
+  "settings.tabGeneral": "Allgemein",
+  "settings.tabSecurity": "Sicherheit",
+  "settings.tabSharing": "Freigabe",
   "settings.appearance": "Darstellung",
   "settings.theme": "Thema",
   "settings.language": "Sprache",
@@ -1367,6 +1382,9 @@ const fr: Dict = {
   "trashDetail.metaDeletedAt": "Supprimé",
 
   "settings.title": "Paramètres",
+  "settings.tabGeneral": "Général",
+  "settings.tabSecurity": "Sécurité",
+  "settings.tabSharing": "Partage",
   "settings.appearance": "Apparence",
   "settings.theme": "Thème",
   "settings.language": "Langue",
