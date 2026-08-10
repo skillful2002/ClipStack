@@ -195,6 +195,7 @@ export interface LanConfigView {
   hasKey: boolean;
   manualPeers: string[];
   port: number;
+  localIp: string;
 }
 
 /** 组内在线设备。 */

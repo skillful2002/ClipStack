@@ -23,6 +23,8 @@ const LAN_KEYS = [
   "lan.port",
   "lan.listenPort",
   "lan.listenPortHint",
+  "lan.localIp",
+  "lan.localIpUnknown",
   "lan.portInUse",
   "lan.manualPeersHint",
   "lan.onlineDevices",

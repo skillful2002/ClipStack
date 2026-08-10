@@ -757,7 +757,7 @@ fn build_envelope(
 
 /// 取本机默认出接口的 IPv4 地址（用于 mDNS 广播 A 记录，供对端连入）。
 /// 通过向公网地址发起 UDP connect（不发包）读取本地出口 IP，跨平台可用。
-fn local_ipv4() -> Option<IpAddr> {
+pub(crate) fn local_ipv4() -> Option<IpAddr> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
     sock.local_addr().ok().map(|a| a.ip())

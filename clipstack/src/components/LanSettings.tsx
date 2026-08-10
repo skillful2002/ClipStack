@@ -22,6 +22,7 @@ export function LanSettings() {
   const [hasKey, setHasKey] = useState(false);
   const [port, setPort] = useState(21995);
   const [listenPort, setListenPort] = useState(21995);
+  const [localIp, setLocalIp] = useState("");
   const [portError, setPortError] = useState("");
 
   const [peers, setPeers] = useState<api.PeerInfo[]>([]);
@@ -49,6 +50,7 @@ export function LanSettings() {
         setHasKey(cfg.hasKey);
         setPort(cfg.port);
         setListenPort(cfg.port);
+        setLocalIp(cfg.localIp);
         setManualPeers(cfg.manualPeers.join("\n"));
       } catch (e) {
         setToast(t("lan.saveFailed", { error: String(e) }));
@@ -175,6 +177,16 @@ export function LanSettings() {
           </label>
         </div>
         <p className="settings-hint">{t("lan.shareOutHint")}</p>
+
+        <div className="settings-row">
+          <span>{t("lan.localIp")}</span>
+          <input
+            type="text"
+            className="readonly-input"
+            readOnly
+            value={localIp || t("lan.localIpUnknown")}
+          />
+        </div>
 
         <div className="settings-row">
           <span>{t("lan.listenPort")}</span>

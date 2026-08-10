@@ -709,6 +709,9 @@ pub async fn lan_get_config(state: State<'_, LanManager>) -> Result<LanConfigVie
         has_key: !cfg.share_key.is_empty(),
         manual_peers: cfg.manual_peers,
         port: cfg.listen_port,
+        local_ip: crate::lan::local_ipv4()
+            .map(|ip| ip.to_string())
+            .unwrap_or_default(),
     })
 }
 
@@ -724,6 +727,7 @@ pub struct LanConfigView {
     pub has_key: bool,
     pub manual_peers: Vec<String>,
     pub port: u16,
+    pub local_ip: String,
 }
 
 // ===== 局域网共享 · 配置管理（L3）=====
