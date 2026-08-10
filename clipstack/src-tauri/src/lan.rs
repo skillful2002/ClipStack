@@ -218,6 +218,8 @@ struct Inner {
     mdns: Option<ServiceDaemon>,
     /// 数据库句柄（写入对端共享条目）。
     db: DbState,
+    /// TCP 监听任务句柄：stop() 时中止以释放端口，避免重绑失败（见 set_config 重启）。
+    server_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 
 /// 局域网同步管理器（Tauri 托管状态）。
@@ -243,6 +245,7 @@ impl LanManager {
                 known_peers: HashMap::new(),
                 mdns: None,
                 db,
+                server_task: None,
             })),
             app,
         }
@@ -312,7 +315,7 @@ impl LanManager {
         let listen_port = inner.config.listen_port;
         let inner_l = self.inner.clone();
         let app_l = self.app.clone();
-        tauri::async_runtime::spawn(async move {
+        let server_handle = tauri::async_runtime::spawn(async move {
             let listener = match TcpListener::bind(("0.0.0.0", listen_port)).await {
                 Ok(l) => l,
                 Err(e) => {
@@ -350,6 +353,8 @@ impl LanManager {
                 }
             }
         });
+        // 记录监听任务句柄，stop() 时中止以释放端口（否则下次 start() 重绑会误报占用）。
+        inner.server_task = Some(server_handle);
 
         // 5) 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
         for addr in inner.config.manual_peers.clone() {
@@ -380,16 +385,26 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let mut inner = self.inner.lock().await;
-        if let Some(mdns) = inner.mdns.take() {
-            let _ = mdns.shutdown();
+        let server_handle = {
+            let mut inner = self.inner.lock().await;
+            if let Some(mdns) = inner.mdns.take() {
+                let _ = mdns.shutdown();
+            }
+            for stop in inner.client_stops.values() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            inner.client_stops.clear();
+            inner.conns.clear();
+            inner.known_peers.clear();
+            // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
+            inner.server_task.take()
+        };
+        // 中止 TCP 监听任务并等待其退出，确保监听端口被释放，
+        // 否则 set_config 重启时发现（start）会因旧监听仍占用端口而误报「端口被占用」。
+        if let Some(h) = server_handle {
+            h.abort();
+            let _ = h.await;
         }
-        for stop in inner.client_stops.values() {
-            stop.store(true, Ordering::SeqCst);
-        }
-        inner.client_stops.clear();
-        inner.conns.clear();
-        inner.known_peers.clear();
     }
 
     /// 广播一条剪贴板条目给所有已连对端（L3 由监控线程调用；L2 由测试命令调用）。
