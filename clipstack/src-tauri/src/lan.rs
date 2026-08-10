@@ -46,20 +46,62 @@ pub struct LanConfig {
     pub share_out: bool,
     pub file_limit_mb: u64,
     pub manual_peers: Vec<String>,
+    /// 本机 WebSocket 监听端口。默认 LAN_PORT；当该端口被占用（冲突）时，
+    /// 用户可在设置中修改为其它端口（如 8790）以规避，并持久化到 settings 表。
+    pub listen_port: u16,
 }
 
 impl Default for LanConfig {
     fn default() -> Self {
         Self {
             device_id: Uuid::new_v4().to_string(),
-            device_name: "ClipStack".into(),
+            device_name: default_device_name(),
             // 默认未配置共享：组/密钥为空且 share_out 关闭，避免误广播给同子网陌生人。
             share_group: String::new(),
             share_key: String::new(),
             share_out: false,
             file_limit_mb: 100,
             manual_peers: Vec::new(),
+            listen_port: LAN_PORT,
         }
+    }
+}
+
+/// 跨平台获取系统机器名（hostname）：
+/// - Windows: %COMPUTERNAME%
+/// - 其它（macOS / Linux 等）：优先 $HOSTNAME，其次 /etc/hostname，最后回退 `hostname` 命令
+/// 任一环节均失败则回退 "ClipStack"。仅作默认设备名，用户仍可在设置中手动覆盖。
+fn default_device_name() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMPUTERNAME")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|_| "ClipStack".into())
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(h) = std::env::var("HOSTNAME") {
+            let h = h.trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+        if let Ok(s) = std::fs::read_to_string("/etc/hostname") {
+            let h = s.trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+        if let Ok(out) = std::process::Command::new("hostname").output() {
+            if out.status.success() {
+                let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !h.is_empty() {
+                    return h;
+                }
+            }
+        }
+        "ClipStack".into()
     }
 }
 
