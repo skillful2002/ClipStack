@@ -1170,16 +1170,20 @@
   border-color: var(--cs-accent);
 }
 
-/* 只读输入框（如本地 IP）：沿用一致外观，但去除聚焦高亮、弱化视觉，提示不可编辑。 */
+/* 只读输入框（如本地 IP）：以虚线边框 + 等宽字体 + 弱化文字明确区分于可编辑输入框。 */
 .settings-row input.readonly-input {
   width: 220px;
+  border: 1px dashed var(--cs-border);
   background: var(--cs-bg-alt, var(--cs-bg));
-  color: var(--cs-text-secondary);
+  color: var(--cs-text-tertiary);
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
   cursor: default;
   user-select: text;
+  box-shadow: none;
 }
 .settings-row input.readonly-input:focus {
   border-color: var(--cs-border);
+  box-shadow: none;
 }
 
 .segmented {
