@@ -701,6 +701,45 @@
   margin-bottom: 16px;
 }
 
+.settings-tabs {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 22px;
+}
+
+.settings-tab {
+  position: relative;
+  padding: 6px 2px 12px;
+  border: none;
+  background: transparent;
+  color: var(--cs-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--cs-text-primary);
+}
+
+.settings-tab.active {
+  color: var(--cs-accent);
+}
+
+/* 选中项以下划线标识：宽度随文字、圆角收尾、用主题强调色，比实心底块更轻盈。 */
+.settings-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cs-accent);
+}
+
 .settings-card {
   background: var(--cs-bg-subtle);
   border: 1px solid var(--cs-border);
@@ -1108,6 +1147,26 @@
 }
 
 .settings-row input[type="number"]:focus {
+  border-color: var(--cs-accent);
+}
+
+/* 与数字输入框保持一致的文本 / 密码输入框样式（共享组、共享密钥、本机设备名等）。
+ * 此前这些输入框无显式样式，在深浅色下呈现浏览器原生外观，与其它输入项不一致。 */
+.settings-row input[type="text"],
+.settings-row input[type="password"] {
+  width: 220px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  font-size: 13px;
+  outline: none;
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+}
+
+.settings-row input[type="text"]:focus,
+.settings-row input[type="password"]:focus {
   border-color: var(--cs-accent);
 }
 
