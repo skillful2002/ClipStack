@@ -1249,6 +1249,33 @@
   font-size: 13px;
 }
 
+/* 手动对端标题行：标签 + 端口徽标（显示本机 WebSocket 端口，便于手动添加对端）。 */
+.lan-manual-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lan-port-badge {
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cs-accent);
+  background: var(--cs-accent-soft);
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.lan-port-error {
+  color: var(--cs-danger, #e5484d);
+  font-weight: 600;
+  border-left: 3px solid var(--cs-danger, #e5484d);
+  padding-left: 8px;
+  margin-top: 6px;
+}
+
 .lan-peers {
   width: 100%;
   min-height: 64px;
@@ -1319,6 +1346,31 @@
 
 .lan-peer-status.on {
   color: #2f9e44;
+}
+
+/* 本机置顶项：左侧强调色条 + 软背景，与远端设备区分。 */
+.lan-self {
+  border-left: 3px solid var(--cs-accent);
+  background: var(--cs-accent-soft);
+}
+
+/* 本机共享状态徽标：未共享=灰、共享中=强调绿。 */
+.lan-self-status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: var(--cs-text-secondary);
+  background: rgba(127, 127, 127, 0.18);
+}
+
+.lan-self-status.on {
+  color: var(--cs-accent);
+  background: var(--cs-accent-soft);
+}
+
+.lan-no-others {
+  margin-top: 8px;
 }
 
 /* ===== P0 · 锁屏遮罩与安全设置 ===== */

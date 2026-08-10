@@ -20,6 +20,9 @@ export function LanSettings() {
   const [fileLimitMb, setFileLimitMb] = useState(100);
   const [manualPeers, setManualPeers] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const [port, setPort] = useState(21995);
+  const [listenPort, setListenPort] = useState(21995);
+  const [portError, setPortError] = useState("");
 
   const [peers, setPeers] = useState<api.PeerInfo[]>([]);
   const [busy, setBusy] = useState(false);
@@ -44,6 +47,8 @@ export function LanSettings() {
         setShareOut(cfg.shareOut);
         setFileLimitMb(cfg.fileLimitMb);
         setHasKey(cfg.hasKey);
+        setPort(cfg.port);
+        setListenPort(cfg.port);
         setManualPeers(cfg.manualPeers.join("\n"));
       } catch (e) {
         setToast(t("lan.saveFailed", { error: String(e) }));
@@ -59,6 +64,10 @@ export function LanSettings() {
       api.onLanClipboardReceived((payload) =>
         setToast(t("lan.receivedFrom", { name: payload.originDevice || t("item.local") })),
       ),
+      api.onLanPortInUse((payload) => {
+        setPortError(t("lan.portInUse", { port: payload.port }));
+        setToast(t("lan.portInUse", { port: payload.port }));
+      }),
     ]);
     return () => {
       void unlisteners.then((fns) => fns.forEach((fn) => fn()));
@@ -89,8 +98,10 @@ export function LanSettings() {
         shareOut,
         fileLimitMb: Math.max(1, Math.min(1024, fileLimitMb || 100)),
         manualPeers: peersList,
+        port: listenPort || 0, // 0 由后端回退为默认 LAN_PORT
       });
       setHasKey(true); // 保存后视为已设（除非组/密钥被清空）
+      setPortError("");
       setToast(t("lan.saved"));
       await refreshPeers();
     } catch (e) {
@@ -116,95 +127,122 @@ export function LanSettings() {
   };
 
   return (
-    <div className="settings-card">
-      <div className="settings-card-title">{t("lan.title")}</div>
-      <p className="settings-hint">{t("lan.hint")}</p>
+    <>
+      <div className="settings-card">
+        <div className="settings-card-title">{t("lan.title")}</div>
+        <p className="settings-hint">{t("lan.hint")}</p>
 
-      <div className="settings-row">
-        <span>{t("lan.group")}</span>
-        <input
-          type="text"
-          placeholder={t("lan.groupPlaceholder")}
-          value={group}
-          onChange={(e) => setGroup(e.target.value)}
-        />
-      </div>
-
-      <div className="settings-row">
-        <span>{t("lan.key")}</span>
-        <input
-          type="password"
-          autoComplete="new-password"
-          placeholder={hasKey ? t("lan.keyPlaceholderKeep") : t("lan.keyPlaceholder")}
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
-      </div>
-
-      <div className="settings-row">
-        <span>{t("lan.name")}</span>
-        <input
-          type="text"
-          placeholder={t("lan.namePlaceholder")}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </div>
-
-      <div className="settings-row">
-        <span>{t("lan.shareOut")}</span>
-        <label className="switch">
+        <div className="settings-row">
+          <span>{t("lan.group")}</span>
           <input
-            type="checkbox"
-            checked={shareOut}
-            onChange={(e) => void onShareOutChange(e.target.checked)}
+            type="text"
+            placeholder={t("lan.groupPlaceholder")}
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
           />
-          <span className="slider" />
-        </label>
-      </div>
-      <p className="settings-hint">{t("lan.shareOutHint")}</p>
+        </div>
 
-      <div className="settings-row">
-        <span>{t("lan.fileLimit")}</span>
-        <input
-          type="number"
-          min={1}
-          max={1024}
-          value={fileLimitMb}
-          onChange={(e) => setFileLimitMb(Number(e.target.value))}
-        />
+        <div className="settings-row">
+          <span>{t("lan.key")}</span>
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder={hasKey ? t("lan.keyPlaceholderKeep") : t("lan.keyPlaceholder")}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-row">
+          <span>{t("lan.name")}</span>
+          <input
+            type="text"
+            placeholder={t("lan.namePlaceholder")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-row">
+          <span>{t("lan.shareOut")}</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={shareOut}
+              onChange={(e) => void onShareOutChange(e.target.checked)}
+            />
+            <span className="slider" />
+          </label>
+        </div>
+        <p className="settings-hint">{t("lan.shareOutHint")}</p>
+
+        <div className="settings-row">
+          <span>{t("lan.fileLimit")}</span>
+          <input
+            type="number"
+            min={1}
+            max={1024}
+            value={fileLimitMb}
+            onChange={(e) => setFileLimitMb(Number(e.target.value))}
+          />
+        </div>
+
+        <div className="settings-row">
+          <span>{t("lan.listenPort")}</span>
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={listenPort}
+            onChange={(e) => {
+              setListenPort(Number(e.target.value));
+              setPortError("");
+            }}
+          />
+        </div>
+        <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
+        {portError && <p className="settings-hint lan-port-error">{portError}</p>}
+
+        <div className="settings-row settings-row-column">
+          <span className="lan-manual-head">
+            {t("lan.manualPeers")}
+            <code className="lan-port-badge">
+              {t("lan.port")} {port}
+            </code>
+          </span>
+          <textarea
+            className="lan-peers"
+            rows={3}
+            placeholder={t("lan.manualPeersPlaceholder", { port })}
+            value={manualPeers}
+            onChange={(e) => setManualPeers(e.target.value)}
+          />
+          <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
+        </div>
+
+        <div className="settings-actions">
+          <button className="primary" disabled={busy} onClick={() => void onSave()}>
+            {t("settings.add")}
+          </button>
+          <button disabled={testing} onClick={() => void onTest()}>
+            {testing ? t("lan.testing") : t("lan.testSend")}
+          </button>
+        </div>
       </div>
 
-      <div className="settings-row settings-row-column">
-        <span>{t("lan.manualPeers")}</span>
-        <textarea
-          className="lan-peers"
-          rows={3}
-          placeholder={t("lan.manualPeersPlaceholder")}
-          value={manualPeers}
-          onChange={(e) => setManualPeers(e.target.value)}
-        />
-      </div>
-
-      <div className="settings-actions">
-        <button className="primary" disabled={busy} onClick={() => void onSave()}>
-          {t("settings.add")}
-        </button>
-        <button disabled={testing} onClick={() => void onTest()}>
-          {testing ? t("lan.testing") : t("lan.testSend")}
-        </button>
-      </div>
-
-      <div className="settings-card-title lan-subtitle">{t("lan.onlineDevices")}</div>
-      {deviceId && (
-        <p className="settings-hint">
-          {t("lan.deviceId")}: <code className="lan-device-id">{deviceId}</code>
-        </p>
-      )}
-      {peers.length === 0 ? (
-        <div className="settings-empty">{t("lan.noPeers")}</div>
-      ) : (
+      <div className="settings-card">
+        <div className="settings-card-title lan-subtitle">{t("lan.onlineDevices")}</div>
         <div className="settings-list">
+          {/* 本机置顶：确认本机在线与共享状态（本机不进入远端连接列表） */}
+          <div className="settings-list-item lan-self">
+            <span className="item-name">
+              {t("lan.thisDevice")}
+              <span className="lan-peer-addr"> {deviceId}</span>
+            </span>
+            <span className={`lan-self-status${shareOut ? " on" : ""}`}>
+              {shareOut ? t("lan.sharing") : t("lan.shareStopped")}
+            </span>
+          </div>
           {peers.map((p) => (
             <div key={p.deviceId} className="settings-list-item">
               <span className="item-name">
@@ -217,8 +255,11 @@ export function LanSettings() {
             </div>
           ))}
         </div>
-      )}
-    </div>
+        {peers.length === 0 && (
+          <p className="settings-hint lan-no-others">{t("lan.noOtherPeers")}</p>
+        )}
+      </div>
+    </>
   );
 }
 

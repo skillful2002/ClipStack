@@ -32,7 +32,7 @@ use crate::db::{self, DbState};
 use crate::models::{ContentType, HistoryItem};
 
 pub const SERVICE_TYPE: &str = "_clipstack._tcp.local.";
-pub const LAN_PORT: u16 = 8787;
+pub const LAN_PORT: u16 = 21995;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 局域网共享配置（内存态；落库经内部密钥包装为 wrapped_key，见 L3）。
@@ -124,6 +124,13 @@ pub struct ReceivedClipPayload {
     pub kind: String,
 }
 
+/// 本机监听端口被占用事件载荷（前端据此给出明确的换端口提示）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortInUsePayload {
+    pub port: u16,
+}
+
 /// 一条已建立的对端连接句柄：持有写端 mpsc，用于向该对端推送信封。
 struct ConnHandle {
     device_id: String,
@@ -155,7 +162,15 @@ pub struct LanManager {
 
 impl LanManager {
     pub fn new(app: AppHandle, db: DbState) -> Self {
-        let cfg = LanConfig::default();
+        let mut cfg = LanConfig::default();
+        // 加载持久化的本机端口（若曾因冲突改过端口，重启后保持一致）。
+        {
+            let conn = db.lock();
+            let saved = db::get_int_setting(&conn, "lan_listen_port", LAN_PORT as i64) as u16;
+            if (1..=65535).contains(&saved) {
+                cfg.listen_port = saved;
+            }
+        }
         let psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
         Self {
             inner: Arc::new(Mutex::new(Inner {
@@ -200,7 +215,7 @@ impl LanManager {
         props.insert("name".into(), inner.config.device_name.clone());
         props.insert("version".into(), APP_VERSION.into());
         props.insert("group_fp".into(), fp);
-        let info = match ServiceInfo::new(SERVICE_TYPE, &instance, &host, ip_arg, LAN_PORT, props) {
+        let info = match ServiceInfo::new(SERVICE_TYPE, &instance, &host, ip_arg, inner.config.listen_port, props) {
             Ok(i) => i,
             Err(e) => {
                 eprintln!("[lan] 服务实例创建失败: {e}");
@@ -233,13 +248,19 @@ impl LanManager {
         });
 
         // 4) TCP 监听（始终作为服务端，供较小 device_id 的对端连入）。
+        let listen_port = inner.config.listen_port;
         let inner_l = self.inner.clone();
         let app_l = self.app.clone();
         tauri::async_runtime::spawn(async move {
-            let listener = match TcpListener::bind(("0.0.0.0", LAN_PORT)).await {
+            let listener = match TcpListener::bind(("0.0.0.0", listen_port)).await {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!("[lan] 监听 {LAN_PORT} 失败: {e}");
+                    eprintln!("[lan] 监听 {listen_port} 失败（端口可能被占用）: {e}");
+                    // 明确通知前端：端口被占用，引导用户到设置中更换端口。
+                    let _ = app_l.emit(
+                        "lan-port-in-use",
+                        PortInUsePayload { port: listen_port },
+                    );
                     return;
                 }
             };
@@ -269,10 +290,14 @@ impl LanManager {
             }
         });
 
-        // 5) 手动 peer：每个地址起一个客户端连接任务。
+        // 5) 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
         for addr in inner.config.manual_peers.clone() {
-            if let Ok(sa) = addr.parse::<SocketAddr>() {
-                spawn_client_retry(sa, &self.inner, &self.app, None).await;
+            let resolved = addr
+                .parse::<SocketAddr>()
+                .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
+            match resolved {
+                Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
+                Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
             }
         }
     }
@@ -284,6 +309,8 @@ impl LanManager {
             inner.config = cfg.clone();
             inner.psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
             inner.store.set_self_device(cfg.device_id.clone());
+            // 持久化本机端口，重启后仍生效。
+            let _ = db::update_setting(&inner.db.lock(), "lan_listen_port", &cfg.listen_port.to_string());
         }
         // 停掉旧的 mDNS，重新 start。
         self.stop().await;
@@ -783,5 +810,30 @@ pub fn text_item(text: &str) -> ClipboardItem {
         kind: ClipKind::Text,
         hash,
         payload,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_device_name_is_nonempty() {
+        // 跨平台获取机器名，任一路径（含回退 "ClipStack"）都应返回非空字符串。
+        assert!(!default_device_name().is_empty());
+    }
+
+    #[test]
+    fn default_config_device_name_uses_hostname() {
+        // 默认设备名应来自系统机器名而非旧的硬编码占位。
+        let name = LanConfig::default().device_name;
+        assert!(!name.is_empty());
+        assert_ne!(name, "ClipStack");
+    }
+
+    #[test]
+    fn default_listen_port_is_lan_port() {
+        // 默认监听端口应等于常量，供冲突时在设置中修改。
+        assert_eq!(LanConfig::default().listen_port, LAN_PORT);
     }
 }

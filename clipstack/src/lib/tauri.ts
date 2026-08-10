@@ -194,6 +194,7 @@ export interface LanConfigView {
   fileLimitMb: number;
   hasKey: boolean;
   manualPeers: string[];
+  port: number;
 }
 
 /** 组内在线设备。 */
@@ -216,6 +217,7 @@ export const lanSetConfig = (cfg: {
   shareOut: boolean;
   fileLimitMb: number;
   manualPeers: string[];
+  port: number;
 }): Promise<void> =>
   invoke<void>("lan_set_config", {
     group: cfg.group,
@@ -224,6 +226,7 @@ export const lanSetConfig = (cfg: {
     shareOut: cfg.shareOut,
     fileLimitMb: cfg.fileLimitMb,
     manualPeers: cfg.manualPeers,
+    port: cfg.port,
   });
 
 /** 切换发布开关（share_out）。 */
@@ -263,3 +266,14 @@ export const onLanClipboardReceived = (
   listen<ReceivedClipPayload>("lan-clipboard-received", (event) =>
     cb(event.payload),
   );
+
+/** 本机监听端口被占用事件载荷。 */
+export interface PortInUsePayload {
+  port: number;
+}
+
+/** 订阅本机端口被占用事件，返回取消订阅函数（前端据此提示用户更换端口）。 */
+export const onLanPortInUse = (
+  cb: (payload: PortInUsePayload) => void,
+): Promise<UnlistenFn> =>
+  listen<PortInUsePayload>("lan-port-in-use", (event) => cb(event.payload));
