@@ -221,15 +221,13 @@ export const lanSetConfig = (cfg: {
   port: number;
 }): Promise<void> =>
   invoke<void>("lan_set_config", {
-    input: {
-      group: cfg.group,
-      key: cfg.key,
-      name: cfg.name,
-      shareOut: cfg.shareOut,
-      fileLimitMb: cfg.fileLimitMb,
-      manualPeers: cfg.manualPeers,
-      port: cfg.port,
-    },
+    group: cfg.group,
+    key: cfg.key,
+    name: cfg.name,
+    shareOut: cfg.shareOut,
+    fileLimitMb: cfg.fileLimitMb,
+    manualPeers: cfg.manualPeers,
+    port: cfg.port,
   });
 
 /** 切换发布开关（share_out）。 */

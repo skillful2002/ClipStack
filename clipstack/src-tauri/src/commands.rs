@@ -645,42 +645,38 @@ mod tests {
 // ===== 局域网共享（L2/L3，见 docs/clipstack-lan-sync-design.md）=====
 
 /// 设置局域网共享配置并重启发现（组/密钥变更需重新注册 mDNS 指纹）。
+/// 采用平铺入参（与 lan_set_share_out 等命令一致），Tauri v2 直接按参数名传参，
+/// 避免单一结构体入参需 `input` 包裹带来的前后端不一致问题。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn lan_set_config(
     state: State<'_, LanManager>,
-    input: LanSetConfigInput,
+    group: String,
+    key: String,
+    name: String,
+    share_out: bool,
+    file_limit_mb: u64,
+    manual_peers: Vec<String>,
+    port: u16,
 ) -> Result<(), String> {
     let mut cfg = state.config().await;
-    cfg.share_group = input.group;
+    cfg.share_group = group;
     // 空密钥表示「保持现有密钥」：避免 UI 未重新输入密钥时误清空共享密钥。
-    if !input.key.is_empty() {
-        cfg.share_key = input.key;
+    if !key.is_empty() {
+        cfg.share_key = key;
     }
-    cfg.device_name = input.name;
-    cfg.share_out = input.share_out;
-    cfg.file_limit_mb = input.file_limit_mb.max(1);
-    cfg.manual_peers = input.manual_peers;
+    cfg.device_name = name;
+    cfg.share_out = share_out;
+    cfg.file_limit_mb = file_limit_mb.max(1);
+    cfg.manual_peers = manual_peers;
     // 端口：0 视为「恢复默认」(LAN_PORT)；u16 天然限制在 1..=65535。
-    cfg.listen_port = if input.port == 0 {
+    cfg.listen_port = if port == 0 {
         crate::lan::LAN_PORT
     } else {
-        input.port
+        port
     };
     state.set_config(cfg).await;
     Ok(())
-}
-
-/// `lan_set_config` 的结构体入参（避免参数过多触发 clippy::too_many_arguments）。
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LanSetConfigInput {
-    pub group: String,
-    pub key: String,
-    pub name: String,
-    pub share_out: bool,
-    pub file_limit_mb: u64,
-    pub manual_peers: Vec<String>,
-    pub port: u16,
 }
 
 /// 向所有已连对端广播一条测试文本（L2 验证用；L3 由监控线程直接调用 broadcast）。
