@@ -16,6 +16,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::{AppHandle, Emitter};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -105,6 +106,72 @@ fn default_device_name() -> String {
     }
 }
 
+/// 将明文共享密钥用内部数据库密钥包装为可落库字符串（不裸存）。
+/// 内部密钥不可用时回退空串（明文密钥一并丢失，与「未设置密钥」等价）。
+fn wrap_lan_key(db: &DbState, plain: &str) -> String {
+    let guard = db.key.lock().expect("key lock poisoned");
+    match guard.as_ref() {
+        Some(k) => STANDARD.encode(crypto::encrypt(k, plain.as_bytes())),
+        None => String::new(),
+    }
+}
+
+/// 还原包装的共享密钥为明文；包装串为空或解密失败均回退空串。
+fn unwrap_lan_key(db: &DbState, wrapped: &str) -> String {
+    let sealed = match STANDARD.decode(wrapped) {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    let guard = db.key.lock().expect("key lock poisoned");
+    match guard.as_ref() {
+        Some(k) => crypto::decrypt(k, &sealed)
+            .and_then(|p| String::from_utf8(p).ok())
+            .unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
+/// 持久化全部局域网共享配置（密钥经包装后落库）。
+fn persist_config(db: &DbState, cfg: &LanConfig) {
+    let conn = db.lock();
+    let _ = db::update_setting(&conn, "lan_share_group", &cfg.share_group);
+    let _ = db::update_setting(&conn, "lan_share_key", &wrap_lan_key(db, &cfg.share_key));
+    let _ = db::update_setting(&conn, "lan_device_name", &cfg.device_name);
+    let _ = db::update_setting(&conn, "lan_share_out", if cfg.share_out { "1" } else { "0" });
+    let _ = db::update_setting(&conn, "lan_file_limit_mb", &cfg.file_limit_mb.to_string());
+    let peers_json = serde_json::to_string(&cfg.manual_peers).unwrap_or_else(|_| "[]".into());
+    let _ = db::update_setting(&conn, "lan_manual_peers", &peers_json);
+    let _ = db::update_setting(&conn, "lan_listen_port", &cfg.listen_port.to_string());
+}
+
+/// 从设置表载入已保存的局域网共享配置；无记录或解密失败时保留传入默认值。
+fn load_persisted_config(db: &DbState, cfg: &mut LanConfig) {
+    let conn = db.lock();
+    cfg.share_group = db::get_string_setting(&conn, "lan_share_group", "");
+    let wrapped = db::get_string_setting(&conn, "lan_share_key", "");
+    if !wrapped.is_empty() {
+        cfg.share_key = unwrap_lan_key(db, &wrapped);
+    }
+    let name = db::get_string_setting(&conn, "lan_device_name", "");
+    if !name.is_empty() {
+        cfg.device_name = name;
+    }
+    cfg.share_out = db::get_string_setting(&conn, "lan_share_out", "0") == "1";
+    let fl = db::get_int_setting(&conn, "lan_file_limit_mb", 100);
+    if fl > 0 {
+        cfg.file_limit_mb = fl as u64;
+    }
+    if let Ok(peers) = serde_json::from_str::<Vec<String>>(
+        &db::get_string_setting(&conn, "lan_manual_peers", "[]"),
+    ) {
+        cfg.manual_peers = peers;
+    }
+    let saved = db::get_int_setting(&conn, "lan_listen_port", LAN_PORT as i64) as u16;
+    if (1..=65535).contains(&saved) {
+        cfg.listen_port = saved;
+    }
+}
+
 /// 组内在线设备（对前端）。
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -163,14 +230,8 @@ pub struct LanManager {
 impl LanManager {
     pub fn new(app: AppHandle, db: DbState) -> Self {
         let mut cfg = LanConfig::default();
-        // 加载持久化的本机端口（若曾因冲突改过端口，重启后保持一致）。
-        {
-            let conn = db.lock();
-            let saved = db::get_int_setting(&conn, "lan_listen_port", LAN_PORT as i64) as u16;
-            if (1..=65535).contains(&saved) {
-                cfg.listen_port = saved;
-            }
-        }
+        // 载入持久化的全部局域网共享配置（组/密钥/设备名/发布开关/文件上限/手动对端/端口）。
+        load_persisted_config(&db, &mut cfg);
         let psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
         Self {
             inner: Arc::new(Mutex::new(Inner {
@@ -309,8 +370,8 @@ impl LanManager {
             inner.config = cfg.clone();
             inner.psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
             inner.store.set_self_device(cfg.device_id.clone());
-            // 持久化本机端口，重启后仍生效。
-            let _ = db::update_setting(&inner.db.lock(), "lan_listen_port", &cfg.listen_port.to_string());
+            // 持久化全部配置（含密钥包装），重启后仍生效。
+            persist_config(&inner.db, &cfg);
         }
         // 停掉旧的 mDNS，重新 start。
         self.stop().await;
@@ -379,7 +440,14 @@ impl LanManager {
 
     /// L3 · 切换发布开关（不影响 mDNS 指纹，无需重启发现）。
     pub async fn set_share_out(&self, enabled: bool) {
-        self.inner.lock().await.config.share_out = enabled;
+        let db = {
+            let mut inner = self.inner.lock().await;
+            inner.config.share_out = enabled;
+            inner.db.clone()
+        };
+        // 仅发布开关变更也要持久化，否则重启后回退。
+        let cfg = self.config().await;
+        persist_config(&db, &cfg);
     }
 
     pub async fn config(&self) -> LanConfig {
@@ -835,5 +903,46 @@ mod tests {
     fn default_listen_port_is_lan_port() {
         // 默认监听端口应等于常量，供冲突时在设置中修改。
         assert_eq!(LanConfig::default().listen_port, LAN_PORT);
+    }
+
+    #[test]
+    fn config_persist_and_reload_roundtrip() {
+        // 回归：全部局域网共享参数（含经包装的密钥）应能被持久化并在重启后还原，
+        // 否则用户设置会丢失（此前仅 lan_listen_port 被持久化）。
+        use crate::crypto::Key;
+        use crate::db::AppDb;
+        use std::sync::{Arc, Mutex};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        let db: DbState = Arc::new(AppDb {
+            conn: Mutex::new(conn),
+            key: Mutex::new(Some(Key([7u8; 32]))),
+        });
+
+        let mut cfg = LanConfig::default();
+        cfg.share_group = "team-a".into();
+        cfg.share_key = "s3cret".into();
+        cfg.device_name = "my-pc".into();
+        cfg.share_out = true;
+        cfg.file_limit_mb = 50;
+        cfg.manual_peers = vec!["192.168.1.5:21995".to_string()];
+        cfg.listen_port = 21996;
+        persist_config(&db, &cfg);
+
+        let mut reloaded = LanConfig::default();
+        load_persisted_config(&db, &mut reloaded);
+
+        assert_eq!(reloaded.share_group, "team-a");
+        assert_eq!(reloaded.share_key, "s3cret"); // 密钥经包装后仍能还原明文
+        assert_eq!(reloaded.device_name, "my-pc");
+        assert!(reloaded.share_out);
+        assert_eq!(reloaded.file_limit_mb, 50);
+        assert_eq!(reloaded.manual_peers, vec!["192.168.1.5:21995".to_string()]);
+        assert_eq!(reloaded.listen_port, 21996);
     }
 }
