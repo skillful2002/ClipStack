@@ -177,17 +177,6 @@ export function LanSettings() {
         <p className="settings-hint">{t("lan.shareOutHint")}</p>
 
         <div className="settings-row">
-          <span>{t("lan.fileLimit")}</span>
-          <input
-            type="number"
-            min={1}
-            max={1024}
-            value={fileLimitMb}
-            onChange={(e) => setFileLimitMb(Number(e.target.value))}
-          />
-        </div>
-
-        <div className="settings-row">
           <span>{t("lan.listenPort")}</span>
           <input
             type="number"
@@ -202,6 +191,17 @@ export function LanSettings() {
         </div>
         <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
         {portError && <p className="settings-hint lan-port-error">{portError}</p>}
+
+        <div className="settings-row">
+          <span>{t("lan.fileLimit")}</span>
+          <input
+            type="number"
+            min={1}
+            max={1024}
+            value={fileLimitMb}
+            onChange={(e) => setFileLimitMb(Number(e.target.value))}
+          />
+        </div>
 
         <div className="settings-row settings-row-column">
           <span className="lan-manual-head">
