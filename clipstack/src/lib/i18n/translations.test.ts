@@ -19,6 +19,7 @@ const LAN_KEYS = [
   "lan.shareOut",
   "lan.shareOutHint",
   "lan.fileLimit",
+  "lan.fileLimitHint",
   "lan.manualPeers",
   "lan.manualPeersPlaceholder",
   "lan.port",

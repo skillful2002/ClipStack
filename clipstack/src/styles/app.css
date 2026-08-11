@@ -1460,8 +1460,9 @@
   padding: 4px 0;
 }
 
-/* 共享类型标题：与主标签（如「本机端口」）保持一致的样式（14px / 主色）。 */
-.lan-share-types-head {
+/* 共享类型标题：与「文件大小上限（MB）」主标签保持一致的样式（14px / 主色）。
+ * 必须高于 .settings-row-column > span（0,1,1）的优先级，否则会被压成次要色小字。 */
+.settings-row-column > span.lan-share-types-head {
   color: var(--cs-text-primary);
   font-size: 14px;
 }

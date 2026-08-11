@@ -335,6 +335,7 @@ export function LanSettings() {
             }}
           />
         </div>
+        <p className="settings-hint">{t("lan.fileLimitHint")}</p>
 
         <div className="settings-row settings-row-column">
           <span className="lan-share-types-head">{t("lan.shareTypes")}</span>
