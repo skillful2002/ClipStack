@@ -80,8 +80,9 @@ fn default_device_name() -> String {
     {
         std::env::var("COMPUTERNAME")
             .map(|s| s.trim().to_string())
+            .ok()
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|_| "ClipStack".into())
+            .unwrap_or_else(|| "ClipStack".into())
     }
     #[cfg(not(windows))]
     {
