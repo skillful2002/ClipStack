@@ -330,8 +330,8 @@ export function LanSettings() {
             onChange={(e) => {
               const v = Number(e.target.value);
               setFileLimitMb(v);
-              // 共享开启时文件上限改动即时生效（静默，避免每次按键弹提示）。
-              if (shareOut) void applyConfig({ fileLimitMb: v }, true);
+              // 文件上限改动即时生效（静默，避免每次按键弹提示），与共享是否开启无关。
+              void applyConfig({ fileLimitMb: v }, true);
             }}
           />
         </div>
@@ -350,8 +350,8 @@ export function LanSettings() {
                       ? [...shareTypes, tp]
                       : shareTypes.filter((x) => x !== tp);
                     setShareTypes(next);
-                    // 共享开启时共享类型改动即时生效（静默）。
-                    if (shareOut) void applyConfig({ shareTypes: next }, true);
+                    // 共享类型改动即时生效（静默），与共享是否开启无关。
+                    void applyConfig({ shareTypes: next }, true);
                   }}
                 />
                 <span>{t(`type.${tp}`)}</span>
