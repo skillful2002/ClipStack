@@ -814,7 +814,7 @@ where
                                         Some(entries) => {
                                             let (joined, blob, size) = match app_r.path().home_dir() {
                                                 Ok(home) => {
-                                                    // 按当前月份分目录落盘，文件名加 sync_id 前缀防同名覆盖。
+                                                    // 按当前月份分目录落盘；文件名遇到同名时以 -1 / -2 后缀区分。
                                                     let dir = share_month_dir(&home);
                                                     let _ = std::fs::create_dir_all(&dir);
                                                     let mut local_paths: Vec<String> = Vec::new();
@@ -828,7 +828,7 @@ where
                                                         if fname.is_empty() {
                                                             continue;
                                                         }
-                                                        let dest = dir.join(format!("{}_{}", r.item.sync_id, fname));
+                                                        let dest = unique_share_path(&dir, &fname);
                                                         if std::fs::write(&dest, &data).is_ok() {
                                                             total += data.len() as u64;
                                                             local_paths
@@ -1169,10 +1169,34 @@ fn png_dimensions_label(blob: &[u8]) -> Option<String> {
 }
 
 /// 局域网共享「文件」的物理落盘目录：`~/.clipstack/share/<YYYY-MM>/`。
-/// 按当前 UTC 月份分目录，便于按时间归类与清理；文件名以 `sync_id_` 为前缀，
-/// 避免不同共享项（不同 sync_id）的同名文件互相覆盖。
+/// 按当前 UTC 月份分目录，便于按时间归类与清理。
 fn share_month_dir(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".clipstack").join("share").join(current_utc_month())
+}
+
+/// 计算共享文件的落盘路径：若 `dir/fname` 已存在，则按 `stem-1.ext` / `stem-2.ext`
+/// 顺序寻找未占用名，避免直接覆盖同名文件。
+fn unique_share_path(dir: &std::path::Path, fname: &str) -> std::path::PathBuf {
+    let candidate = dir.join(fname);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = std::path::Path::new(fname);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| fname.to_string());
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()));
+    let mut n: u32 = 1;
+    loop {
+        let candidate = dir.join(format!("{}-{}{}", stem, n, ext.clone().unwrap_or_default()));
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// 局域网共享文件根目录：`~/.clipstack/share/`（所有月份子目录的父目录）。

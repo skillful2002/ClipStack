@@ -1291,6 +1291,62 @@
   cursor: not-allowed;
 }
 
+/* 确认弹窗（清空共享文件等）。 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.modal-box {
+  width: 100%;
+  max-width: 360px;
+  background: var(--cs-bg);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  padding: 20px;
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cs-text-primary);
+  margin-bottom: 10px;
+}
+.modal-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--cs-text-secondary);
+  margin: 0 0 18px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.modal-actions button {
+  padding: 7px 16px;
+  border-radius: var(--cs-radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--cs-border);
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+  transition: background 0.15s ease, filter 0.15s ease;
+}
+.modal-actions .btn-danger {
+  color: #fff;
+  background: #dc2626;
+  border-color: #dc2626;
+}
+.modal-actions .btn-danger:hover {
+  background: #b91c1c;
+}
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--cs-border);

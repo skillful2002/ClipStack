@@ -53,6 +53,7 @@ const LAN_KEYS = [
   "lan.shareFilesLocation",
   "lan.openShareFolder",
   "lan.clearShareFiles",
+  "lan.clearShareConfirmTitle",
   "lan.clearShareConfirm",
   "lan.shareFilesEmpty",
   "lan.clearShareDone",

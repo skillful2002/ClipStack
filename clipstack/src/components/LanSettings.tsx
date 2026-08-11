@@ -36,6 +36,8 @@ export function LanSettings() {
   // 共享文件统计 [文件数, 总字节数] 与保存位置。
   const [shareStats, setShareStats] = useState<[number, number]>([0, 0]);
   const [shareFolderPath, setShareFolderPath] = useState("");
+  // 清空共享文件确认弹窗。
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const refreshPeers = async () => {
     try {
@@ -77,9 +79,11 @@ export function LanSettings() {
       api.onLanPeerOffline((p) =>
         setPeers((prev) => prev.filter((x) => x.deviceId !== p.deviceId)),
       ),
-      api.onLanClipboardReceived((payload) =>
-        setToast(t("lan.receivedFrom", { name: payload.originDevice || t("item.local") })),
-      ),
+      api.onLanClipboardReceived((payload) => {
+        setToast(t("lan.receivedFrom", { name: payload.originDevice || t("item.local") }));
+        // 收到共享内容（可能是文件）后及时刷新「共享文件」数量与大小。
+        void refreshShareFiles();
+      }),
       api.onLanPortInUse((payload) => {
         setPortError(t("lan.portInUse", { port: payload.port }));
         setToast(t("lan.portInUse", { port: payload.port }));
@@ -170,17 +174,19 @@ export function LanSettings() {
     }
   };
 
-  // 清空共享文件夹：先确认（弹窗展示文件数量与大小），确认后再执行并刷新统计。
-  const onClearShareFiles = async () => {
-    const [count, size] = shareStats;
+  // 清空共享文件夹：为空时直接提示；否则先弹出确认框（展示文件数量与大小）。
+  const onClearShareFiles = () => {
+    const [count] = shareStats;
     if (count === 0) {
       setToast(t("lan.shareFilesEmpty"));
       return;
     }
-    const ok = window.confirm(
-      t("lan.clearShareConfirm", { count, size: formatBytes(size) }),
-    );
-    if (!ok) return;
+    setShowClearConfirm(true);
+  };
+
+  // 确认清空：执行删除并刷新统计。
+  const onConfirmClear = async () => {
+    setShowClearConfirm(false);
     try {
       const removed = await api.lanClearShareFiles();
       setToast(t("lan.clearShareDone", { count: removed }));
@@ -415,6 +421,28 @@ export function LanSettings() {
           <p className="settings-hint lan-no-others">{t("lan.noOtherPeers")}</p>
         )}
       </div>
+
+      {showClearConfirm && (
+        <div className="modal-overlay" onClick={() => setShowClearConfirm(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">{t("lan.clearShareConfirmTitle")}</div>
+            <p className="modal-body">
+              {t("lan.clearShareConfirm", {
+                count: shareStats[0],
+                size: formatBytes(shareStats[1]),
+              })}
+            </p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setShowClearConfirm(false)}>
+                {t("confirm.cancel")}
+              </button>
+              <button className="btn-danger" onClick={() => void onConfirmClear()}>
+                {t("lan.clearShareFiles")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
