@@ -963,6 +963,13 @@ where
                         Err(_) => continue,
                     };
                     let rid = env.device_id.clone();
+                    // 不接收来自本机自身的共享数据（回环 / 同机多实例互发），也不将自身登记为在线对端。
+                    {
+                        let g = inner_r.lock().await;
+                        if !g.config.device_id.is_empty() && rid == g.config.device_id {
+                            continue;
+                        }
+                    }
                     // 首个信封获知对端 id（服务端侧）。
                     if learned_id.is_none() {
                         learned_id = Some(rid.clone());

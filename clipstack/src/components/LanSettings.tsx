@@ -365,21 +365,24 @@ export function LanSettings() {
           <span className="lan-share-types-head">{t("lan.shareTypes")}</span>
           <div className="lan-share-types">
             {SHARE_TYPES.map((tp) => (
-              <label key={tp} className="checkbox-inline">
-                <input
-                  type="checkbox"
-                  checked={shareTypes.includes(tp)}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                      ? [...shareTypes, tp]
-                      : shareTypes.filter((x) => x !== tp);
-                    setShareTypes(next);
-                    // 共享类型改动即时生效（静默），与共享是否开启无关。
-                    void applyConfig({ shareTypes: next }, true);
-                  }}
-                />
+              <div key={tp} className="lan-share-type-row">
                 <span>{t(`type.${tp}`)}</span>
-              </label>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={shareTypes.includes(tp)}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? [...shareTypes, tp]
+                        : shareTypes.filter((x) => x !== tp);
+                      setShareTypes(next);
+                      // 共享类型改动即时生效（静默），与共享是否开启无关。
+                      void applyConfig({ shareTypes: next }, true);
+                    }}
+                  />
+                  <span className="slider" />
+                </label>
+              </div>
             ))}
           </div>
           <p className="settings-hint">{t("lan.shareTypesHint")}</p>

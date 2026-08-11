@@ -1316,9 +1316,8 @@
 .settings-row .switch input:disabled + .slider {
   opacity: 0.5;
 }
-.lan-share-types input:disabled + span {
-  color: var(--cs-text-tertiary);
-  opacity: 0.7;
+.lan-share-types input:disabled + .slider {
+  opacity: 0.5;
 }
 .share-files-stat {
   font-variant-numeric: tabular-nums;
@@ -1552,11 +1551,12 @@
   margin: 18px 0;
 }
 
-/* 共享类型：文本 / 图片 / 文件 横向排列的勾选项。 */
+/* 共享类型：文本 / 图片 / 文件，同处一行靠左，每项标签左 / 开关右。 */
 .lan-share-types {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  justify-content: flex-start;
+  gap: 20px;
   padding: 4px 0;
 }
 
@@ -1567,25 +1567,13 @@
   font-size: 14px;
 }
 
-.checkbox-inline {
+.lan-share-type-row {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   font-size: 13px;
   color: var(--cs-text);
-  cursor: pointer;
-  user-select: none;
-}
-
-.checkbox-inline input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--cs-accent);
-  cursor: pointer;
-}
-
-.checkbox-inline input:disabled {
-  cursor: not-allowed;
 }
 
 .lan-port-error {
