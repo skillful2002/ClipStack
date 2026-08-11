@@ -155,12 +155,16 @@ pub fn run() {
             app.manage(lan.clone());
             tauri::async_runtime::spawn(async move {
                 lan.start().await;
-                // 启动初期网络 / mDNS 可能尚未就绪（如 Wi-Fi 未完成关联、对端同时启动），
-                // 此时注册的服务地址可能为 0.0.0.0 或对端尚未宣告，导致首次发现失败，
-                // 表现为「每次启动都要手动点一次保存才能看到共享设备」。
-                // 延迟兜底：若数秒后仍未连上任何对端，则重启 mDNS（重注册 + 重浏览）。
-                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-                if lan.peers().await.is_empty() {
+                // 启动初期网络 / mDNS 可能尚未就绪（如 Wi-Fi 未完成关联、对端尚未重新宣告，
+                // 或对端仍缓存着本机旧实例、未触发重新发现），导致首次发现失败，表现为
+                // 「重启后需手动点一次保存才能在共享列表里看到设备」。
+                // 周期性兜底：每隔几秒若仍未连上任何对端，则重启 mDNS（重注册 + 重浏览，
+                // 触发对端重新发现本机），直到连上或超时（最多约 30s，避免无限重启）。
+                for _ in 0..10 {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if !lan.peers().await.is_empty() {
+                        break;
+                    }
                     lan.stop().await;
                     lan.start().await;
                 }

@@ -946,9 +946,23 @@ fn build_envelope(
 /// 取本机默认出接口的 IPv4 地址（用于 mDNS 广播 A 记录，供对端连入）。
 /// 通过向公网地址发起 UDP connect（不发包）读取本地出口 IP，跨平台可用。
 pub(crate) fn local_ipv4() -> Option<IpAddr> {
-    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect("8.8.8.8:80").ok()?;
-    sock.local_addr().ok().map(|a| a.ip())
+    // 通过向若干公共 DNS 发起 UDP connect 探测本机出口 IPv4。
+    // 程序启动早期网络路由可能尚未就绪（或某 DNS 被网络屏蔽），
+    // 故逐一尝试多个目标，任一可达即可拿到真实出口地址；全部失败才返回 None
+    // （调用方会退化为 0.0.0.0，并依赖启动兜底逻辑在稍后重启时重新注册真实地址）。
+    const PROBES: [&str; 3] = ["8.8.8.8:80", "1.1.1.1:80", "9.9.9.9:80"];
+    for target in PROBES {
+        if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+            if sock.connect(target).is_ok() {
+                if let Ok(addr) = sock.local_addr() {
+                    if !addr.ip().is_unspecified() {
+                        return Some(addr.ip());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// mDNS 实例标签：仅「纯实例名」，绝不可附带服务类型后缀。
