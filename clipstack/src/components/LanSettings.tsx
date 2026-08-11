@@ -318,7 +318,7 @@ export function LanSettings() {
           {/* 本机置顶：确认本机在线与共享状态（本机不进入远端连接列表） */}
           <div className="settings-list-item lan-self">
             <span className="item-name">
-              {t("lan.thisDevice")}
+              {name || t("lan.thisDevice")}
               <span className="lan-peer-addr"> {deviceId}</span>
             </span>
             <span className={`lan-self-status${shareOut ? " on" : ""}`}>
