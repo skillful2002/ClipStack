@@ -415,8 +415,10 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let server_handle = {
+        let (server_handle, removed) = {
             let mut inner = self.inner.lock().await;
+            // 收集将被移除的对端，便于在共享关闭时广播离线事件。
+            let removed: Vec<String> = inner.conns.keys().cloned().collect();
             if let Some(mdns) = inner.mdns.take() {
                 let _ = mdns.shutdown();
             }
@@ -428,13 +430,28 @@ impl LanManager {
             inner.known_peers.clear();
             inner.peer_names.clear();
             // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
-            inner.server_task.take()
+            (inner.server_task.take(), removed)
         };
         // 中止 TCP 监听任务并等待其退出，确保监听端口被释放，
         // 否则 set_config 重启时发现（start）会因旧监听仍占用端口而误报「端口被占用」。
         if let Some(h) = server_handle {
             h.abort();
             let _ = h.await;
+        }
+        // 仅当共享确实关闭时广播离线：配置热更新（共享仍开）会立即重连，
+        // 不广播离线可避免「在线设备」列表闪烁。
+        if !self.inner.lock().await.config.share_out {
+            for id in removed {
+                let _ = self.app.emit(
+                    "lan-peer-offline",
+                    PeerInfo {
+                        device_id: id,
+                        name: String::new(),
+                        addr: String::new(),
+                        connected: false,
+                    },
+                );
+            }
         }
     }
 
@@ -739,12 +756,20 @@ where
     let _ = tx.send(Message::Text(hello.into()));
     let read_task = tauri::async_runtime::spawn(async move {
         let mut learned_id: Option<String> = peer_id.clone();
-        while let Some(msg) = read.next().await {
-            let msg = match msg {
-                Ok(m) => m,
-                Err(_) => break,
-            };
-            match msg {
+        // 心跳保活：每 15s 发送一次 Ping，对端自动回 Pong；若 45s 内无任何消息
+        // （含 Pong），视为对端已断线（断电 / 断网等静默断开），主动关闭连接，
+        // 使「在线设备」列表能及时移除该设备。
+        let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
+        let idle = std::time::Duration::from_secs(45);
+        loop {
+            let tick = tokio::time::sleep(idle);
+            tokio::select! {
+                next = read.next() => {
+                    let msg = match next {
+                        Some(Ok(m)) => m,
+                        _ => break,
+                    };
+                    match msg {
                 Message::Text(s) => {
                     // 握手：对端告知其 device_id + 名称，使本端（服务端侧）立即登记「在线」，
                     // 而无需等待首条剪贴板信封。客户端侧 learned_id 已由 mDNS 预置，此处仅更新名称。
@@ -758,6 +783,12 @@ where
                                     .to_string();
                                 if learned_id.is_none() {
                                     learned_id = Some(rid.to_string());
+                                    // 手动对端无 mDNS，名称只能来自 hello：先把友好名写入
+                                    // peer_names 再注册，使首次「在线」事件即带机器名称（而非 ID）。
+                                    {
+                                        let mut g = inner_r.lock().await;
+                                        g.peer_names.entry(rid.to_string()).or_insert(nm.clone());
+                                    }
                                     register_conn(&inner_r, &app_r, rid, tx_r.clone()).await;
                                 } else {
                                     update_peer_name(&inner_r, &app_r, rid, &nm).await;
@@ -955,6 +986,12 @@ where
                 }
                 Message::Close(_) => break,
                 _ => {}
+                    }
+                }
+                _ = tick => break,
+                _ = ping.tick() => {
+                    let _ = tx_r.send(Message::Ping(Default::default()));
+                }
             }
         }
         // 连接关闭：移除并通知。
