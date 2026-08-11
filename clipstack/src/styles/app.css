@@ -1170,6 +1170,38 @@
   border-color: var(--cs-accent);
 }
 
+/* 文本 / 密码输入框 + 右侧操作按钮（如共享密钥的显示/隐藏图标）的组合容器。 */
+.settings-row .input-with-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-row .input-with-action input[type="text"],
+.settings-row .input-with-action input[type="password"] {
+  width: auto;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.settings-row .input-reveal {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-bg);
+  color: var(--cs-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.settings-row .input-reveal:hover {
+  color: var(--cs-accent);
+  border-color: var(--cs-accent);
+}
+
 /* 只读输入框（如本地 IP）：以虚线边框 + 等宽字体 + 弱化文字明确区分于可编辑输入框。 */
 .settings-row input.readonly-input {
   width: 220px;

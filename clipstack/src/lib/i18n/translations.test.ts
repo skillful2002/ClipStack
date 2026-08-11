@@ -12,6 +12,7 @@ const LAN_KEYS = [
   "lan.groupPlaceholder",
   "lan.key",
   "lan.keyPlaceholder",
+  "lan.toggleKey",
   "lan.keyPlaceholderKeep",
   "lan.name",
   "lan.namePlaceholder",
