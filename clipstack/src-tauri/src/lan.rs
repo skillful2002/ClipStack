@@ -740,6 +740,11 @@ where
                             let origin = r.item.device_id.clone();
                             let lamport = r.item.lamport as i64;
                             let hash = r.item.hash.clone();
+                            // 先落库，再在释放 db 锁之后才 emit 事件。
+                            // 注意：clipboard-changed 的监听回调会再次获取 db.key / db.conn，
+                            // 若在持有 std::sync::Mutex 锁的上下文中 emit 会重入死锁，进而永久
+                            // 卡死接收线程并拖垮整个 UI（表现为一方复制、另一方卡死无响应）。
+                            let mut changed_item: Option<HistoryItem> = None;
                             {
                                 let db = inner_r.lock().await.db.clone();
                                 let conn = db.conn.lock().unwrap();
@@ -762,9 +767,9 @@ where
                                     },
                                 ) {
                                     Ok(Some(rid)) => {
-                                        // 新条目：触发历史刷新（托盘/前端均监听此事件）。
+                                        // 新条目：记录待发送事件，稍后于锁外 emit。
                                         // 用真实插入行 id，保证前端 prepend 后该条目可被选中 / 详情查看。
-                                        let hi = HistoryItem {
+                                        changed_item = Some(HistoryItem {
                                             id: rid,
                                             content_type: content_type_from_str(&ct_str),
                                             content_text: text.clone(),
@@ -779,12 +784,15 @@ where
                                             origin_device: origin.clone(),
                                             is_remote: true,
                                             deleted_at: None,
-                                        };
-                                        let _ = app_r.emit("clipboard-changed", hi);
+                                        });
                                     }
                                     Ok(None) => {} // 已存在（去重），不刷新
                                     Err(e) => eprintln!("[lan] 写入对端条目失败: {e}"),
                                 }
+                            }
+                            // 锁已释放，再通知前端 / 托盘刷新，避免重入死锁。
+                            if let Some(hi) = changed_item {
+                                let _ = app_r.emit("clipboard-changed", hi);
                             }
                             let _ = app_r.emit(
                                 "lan-clipboard-received",
@@ -915,7 +923,9 @@ fn build_envelope(
 ) -> Option<SyncEnvelope> {
     let lamport = store.clock().current() + 1;
     let hash = ClipboardItem::content_hash(&item.payload);
-    let plain = serde_json::to_vec(&item).ok()?;
+    // 明文即剪贴板真实内容字节，而非整个 ClipboardItem 的 JSON 序列化。
+    // 否则接收端会把 {sync_id,device_id,lamport,kind,hash,payload} 的 JSON 当成内容显示。
+    let plain = item.payload;
     let mut sealed = crypto::encrypt(psk, &plain); // nonce(12) || ct
     if sealed.len() < NONCE_LEN {
         return None;

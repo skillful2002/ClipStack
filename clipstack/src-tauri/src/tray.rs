@@ -72,9 +72,9 @@ fn build_menu(
     state: &AppState,
 ) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
-    // 锁定顺序与捕获线程一致：先 key 后 conn，避免死锁。
-    let key_guard = db.key.lock().expect("key lock poisoned");
+    // 锁定顺序与捕获线程一致：先 conn 后 key，避免与 clipboard 捕获线程形成 AB/BA 死锁。
     let conn = db.conn.lock().expect("db lock poisoned");
+    let key_guard = db.key.lock().expect("key lock poisoned");
     // 锁定态（已设主密码且当前锁定）：不展示任何历史明文/密文。
     let locked = state.is_locked() && db::has_master_password(&conn);
     // 是否已设主密码（用于决定是否显示「锁定」菜单——仅解锁态且已设密码时显示）。
@@ -92,8 +92,9 @@ fn build_menu(
         &setting,
         *app.state::<MenuLang>().0.lock().expect("menu lang lock poisoned"),
     );
-    drop(conn);
+    // 按与获取相反的顺序释放：先 key 后 conn。
     drop(key_guard);
+    drop(conn);
 
     if locked {
         // 锁定态：仅给一个「点击解锁」占位项，绝不泄露明文或密文。
@@ -181,10 +182,10 @@ fn handle_menu_event(
                 return;
             }
             // 取密钥用于解密（key=None 时透传明文，兼容未启用安全）。
-            // 锁顺序与 build_menu / 捕获线程一致：先 key 后 conn。
-            let key_guard = db.key.lock().expect("key lock poisoned");
+            // 锁顺序与 build_menu / 捕获线程一致：先 conn 后 key，避免 AB/BA 死锁。
             let (item, blob) = {
                 let conn = db.conn.lock().expect("db lock poisoned");
+                let key_guard = db.key.lock().expect("key lock poisoned");
                 let item = db::get_item(&conn, key_guard.as_ref(), id_num).ok();
                 let blob: Option<Vec<u8>> = item.as_ref().and_then(|it| {
                     if matches!(it.content_type, ContentType::Image | ContentType::File) {
@@ -200,7 +201,6 @@ fn handle_menu_event(
                 });
                 (item, blob)
             };
-            drop(key_guard);
             if let Some(item) = item {
                 match item.content_type {
                     ContentType::Image => {
