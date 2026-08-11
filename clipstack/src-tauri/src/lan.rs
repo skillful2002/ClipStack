@@ -429,6 +429,10 @@ impl LanManager {
                 || old.listen_port != cfg.listen_port
                 || old.share_out != cfg.share_out
         };
+        let share_changed = {
+            let inner = self.inner.lock().await;
+            inner.config.share_out != cfg.share_out
+        };
         {
             let mut inner = self.inner.lock().await;
             inner.config = cfg.clone();
@@ -443,6 +447,11 @@ impl LanManager {
             // 停掉旧的 mDNS，重新 start。
             self.stop().await;
             self.start().await;
+        }
+        if share_changed {
+            // 共享开关变化：通知前端同步（lan-config-changed）并刷新托盘菜单的圆点 / 状态文字。
+            let _ = self.app.emit("lan-config-changed", ());
+            let _ = self.app.emit("refresh-tray", ());
         }
         Ok(())
     }
@@ -607,8 +616,10 @@ impl LanManager {
             // 重启发现 / 监听，使开关真正生效（与 set_config 中 share_out 变化的路径一致）。
             self.stop().await;
             self.start().await;
-            // 通知前端立即同步开关状态（主要服务「托盘切换共享」场景）。
+            // 通知前端立即同步开关状态（主要服务「托盘切换共享」与「设置页切换」场景）。
             let _ = self.app.emit("lan-config-changed", ());
+            // 通知托盘重建菜单，刷新「共享」项的圆点与状态文字（设置页切换后托盘也要更新）。
+            let _ = self.app.emit("refresh-tray", ());
         }
         Ok(())
     }

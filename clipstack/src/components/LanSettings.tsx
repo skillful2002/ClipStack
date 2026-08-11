@@ -300,30 +300,6 @@ export function LanSettings() {
         </div>
 
         <div className="settings-row">
-          <span>{t("lan.name")}</span>
-          <input
-            type="text"
-            placeholder={t("lan.namePlaceholder")}
-            value={name}
-            disabled={shareOut}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <p className="settings-hint lan-device-id-hint">
-          {t("lan.deviceId")}：{deviceId}
-        </p>
-
-        <div className="settings-row">
-          <span>{t("lan.localIp")}</span>
-          <input
-            type="text"
-            className="readonly-input"
-            readOnly
-            value={localIp || t("lan.localIpUnknown")}
-          />
-        </div>
-
-        <div className="settings-row">
           <span>{t("lan.listenPort")}</span>
           <input
             type="number"
@@ -339,6 +315,14 @@ export function LanSettings() {
         </div>
         <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
         {portError && <p className="settings-hint lan-port-error">{portError}</p>}
+
+        <div className="settings-row lan-device-info-head">
+          <span>{t("lan.deviceInfo")}</span>
+        </div>
+        <p className="settings-hint lan-device-info-value">
+          {t("lan.name")}：{name || "-"}，{t("lan.deviceId")}：{deviceId || "-"}，
+          {t("lan.localIp")}：{localIp || t("lan.localIpUnknown")}
+        </p>
 
         <div className="settings-row settings-row-column">
           <span className="lan-manual-head">

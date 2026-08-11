@@ -1517,6 +1517,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-top: 22px;
   color: var(--cs-text-primary);
   font-size: 14px;
 }
@@ -1533,10 +1534,15 @@
 }
 
 /* 机器名称下方的本机设备 ID 提示（等宽字体，可选取）。 */
-.lan-device-id-hint {
-  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
-  user-select: text;
+/* 本机信息：「本机信息」采用与「本机端口」相同的行样式（标题行），
+ * 其下方三项合并为一行只读文字，单独成行并采用提示文字（.settings-hint）样式。 */
+.lan-device-info-head {
+  margin-top: 18px;
+}
+.lan-device-info-value {
+  margin: 0;
   word-break: break-all;
+  user-select: text;
 }
 
 /* 局域网共享设置组内分隔线，用于把「共享运行参数」与「共享内容配置」分组隔开。 */
