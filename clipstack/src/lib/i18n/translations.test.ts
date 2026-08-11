@@ -47,6 +47,7 @@ const LAN_KEYS = [
   "lan.receivedFrom",
   "lan.shareTypes",
   "lan.shareTypesHint",
+  "lan.applyNow",
   "item.local",
 ];
 

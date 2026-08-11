@@ -87,13 +87,10 @@ export function LanSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onShareOutChange = async (next: boolean) => {
+  // 仅更新本地状态；是否共享与其它共享参数统一在「立即生效」时落库，
+  // 避免未点保存就已对局域网广播。
+  const onShareOutChange = (next: boolean) => {
     setShareOut(next);
-    try {
-      await api.lanSetShareOut(next);
-    } catch (e) {
-      setToast(t("lan.saveFailed", { error: String(e) }));
-    }
   };
 
   const onSave = async () => {
@@ -146,11 +143,25 @@ export function LanSettings() {
         <p className="settings-hint">{t("lan.hint")}</p>
 
         <div className="settings-row">
+          <span>{t("lan.shareOut")}</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={shareOut}
+              onChange={(e) => onShareOutChange(e.target.checked)}
+            />
+            <span className="slider" />
+          </label>
+        </div>
+        <p className="settings-hint">{t("lan.shareOutHint")}</p>
+
+        <div className="settings-row">
           <span>{t("lan.group")}</span>
           <input
             type="text"
             placeholder={t("lan.groupPlaceholder")}
             value={group}
+            disabled={!shareOut}
             onChange={(e) => setGroup(e.target.value)}
           />
         </div>
@@ -163,6 +174,7 @@ export function LanSettings() {
               autoComplete="new-password"
               placeholder={hasKey ? t("lan.keyPlaceholderKeep") : t("lan.keyPlaceholder")}
               value={key}
+              disabled={!shareOut}
               onChange={(e) => setKey(e.target.value)}
             />
             <button
@@ -205,22 +217,10 @@ export function LanSettings() {
             type="text"
             placeholder={t("lan.namePlaceholder")}
             value={name}
+            disabled={!shareOut}
             onChange={(e) => setName(e.target.value)}
           />
         </div>
-
-        <div className="settings-row">
-          <span>{t("lan.shareOut")}</span>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={shareOut}
-              onChange={(e) => void onShareOutChange(e.target.checked)}
-            />
-            <span className="slider" />
-          </label>
-        </div>
-        <p className="settings-hint">{t("lan.shareOutHint")}</p>
 
         <div className="settings-row">
           <span>{t("lan.localIp")}</span>
@@ -239,6 +239,7 @@ export function LanSettings() {
             min={1}
             max={65535}
             value={listenPort}
+            disabled={!shareOut}
             onChange={(e) => {
               setListenPort(Number(e.target.value));
               setPortError("");
@@ -255,6 +256,7 @@ export function LanSettings() {
             min={1}
             max={1024}
             value={fileLimitMb}
+            disabled={!shareOut}
             onChange={(e) => setFileLimitMb(Number(e.target.value))}
           />
         </div>
@@ -294,6 +296,7 @@ export function LanSettings() {
             rows={3}
             placeholder={t("lan.manualPeersPlaceholder", { port })}
             value={manualPeers}
+            disabled={!shareOut}
             onChange={(e) => setManualPeers(e.target.value)}
           />
           <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
@@ -301,7 +304,7 @@ export function LanSettings() {
 
         <div className="settings-actions">
           <button className="primary" disabled={busy} onClick={() => void onSave()}>
-            {t("lan.save")}
+            {t("lan.applyNow")}
           </button>
           <button disabled={testing} onClick={() => void onTest()}>
             {testing ? t("lan.testing") : t("lan.testSend")}
