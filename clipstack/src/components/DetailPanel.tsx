@@ -39,6 +39,18 @@ export function DetailPanel() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
+  // 单击图片后全屏查看大图的浮层开关。
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // ESC 关闭大图浮层。
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxOpen]);
 
   // 选中图片时拉取二进制并生成可预览的对象 URL；切换 / 卸载时回收旧 URL，避免内存泄漏。
   useEffect(() => {
@@ -108,12 +120,17 @@ export function DetailPanel() {
             {imgLoading && <div className="preview-image-placeholder">{t("detail.imageLoading")}</div>}
             {imgError && <div className="preview-image-placeholder">{t("detail.imageError")}</div>}
             {imgUrl && !imgLoading && !imgError && (
-              <img
-                className="preview-image"
-                src={imgUrl}
-                alt={t("detail.imageAlt")}
-                onError={() => setImgError(true)}
-              />
+              <>
+                <img
+                  className="preview-image"
+                  src={imgUrl}
+                  alt={t("detail.imageAlt")}
+                  title={t("detail.clickZoom")}
+                  onError={() => setImgError(true)}
+                  onClick={() => setLightboxOpen(true)}
+                />
+                <p className="preview-image-hint">{t("detail.clickZoom")}</p>
+              </>
             )}
           </div>
         ) : isFile ? (
@@ -175,6 +192,23 @@ export function DetailPanel() {
           <span className="btn-shortcut">{ACTION_SHORTCUTS.del}</span>
         </button>
       </div>
+
+      {lightboxOpen && imgUrl && (
+        <div
+          className="image-lightbox"
+          role="dialog"
+          aria-label={t("detail.imageZoom")}
+          onClick={() => setLightboxOpen(false)}
+        >
+          <img
+            className="image-lightbox-img"
+            src={imgUrl}
+            alt={t("detail.imageAlt")}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <span className="image-lightbox-hint">{t("detail.imageZoomClose")}</span>
+        </div>
+      )}
     </aside>
   );
 }

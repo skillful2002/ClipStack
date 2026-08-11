@@ -491,6 +491,10 @@ impl LanManager {
             Ok(b) => b,
             Err(_) => return 0,
         };
+        // 将整条信封切分为 32KB 的小帧发送：单条超大 WebSocket 消息会以「一整帧」传输，
+        // 期间无法插入 Ping/Pong 控制帧，弱网下大文件传输超过心跳宽限会被误判为断线而掐断。
+        // 分片后控制帧可在分片之间穿插，连接始终存活，大文件也能完整送达。
+        let frames = build_chunk_frames(&bytes);
         let mut count = 0;
         // 复制发送端，避免持有锁期间 await。
         let handles: Vec<(String, mpsc::UnboundedSender<Message>)> = inner
@@ -500,7 +504,14 @@ impl LanManager {
             .collect();
         drop(inner);
         for (_, tx) in handles {
-            if tx.send(Message::Binary(bytes.clone().into())).is_ok() {
+            let mut sent = true;
+            for f in &frames {
+                if tx.send(f.clone()).is_err() {
+                    sent = false;
+                    break;
+                }
+            }
+            if sent {
                 count += 1;
             }
         }
@@ -554,9 +565,13 @@ impl LanManager {
         source_app: &str,
         content_blob: Option<Vec<u8>>,
     ) -> usize {
-        let (share_out, file_limit_mb) = {
+        let (share_out, file_limit_mb, share_types) = {
             let inner = self.inner.lock().await;
-            (inner.config.share_out, inner.config.file_limit_mb)
+            (
+                inner.config.share_out,
+                inner.config.file_limit_mb,
+                inner.config.share_types.clone(),
+            )
         };
         if !share_out {
             return 0;
@@ -568,6 +583,11 @@ impl LanManager {
             "file" => ClipKind::File,
             _ => ClipKind::Text,
         };
+        // 按「共享类型」白名单过滤：未勾选的类型（全部取消则不共享任何内容）直接跳过。
+        // 文本 / 链接 / 代码统一归入「text」开关；图片归「image」；文件归「file」。
+        if !kind_allowed(&share_types, kind) {
+            return 0;
+        }
         // 真实明文负载：
         // - 图片用 PNG 字节（之前误把「WxH 图片」占位文本当负载，导致对端收不到图片）；
         // - 文件用二进制 bundle（文件名 + 字节），跨端物理传输后落盘到本机 share 目录；
@@ -782,14 +802,25 @@ where
         // 使「在线设备」列表能及时移除该设备。
         let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
         let idle = std::time::Duration::from_secs(45);
+        // 最近一次「收到任何帧（含对端自动回的 Pong 控制帧）」的时间，用于判断对端存活。
+        // 用「连接活跃度」而非「读空闲计时器」：大文件传输时接收方忙于读取整条消息、暂时
+        // 无法回应上层消息，但底层仍会自动回 Pong，故不会被误判为断线；真正静默断开
+        // （断电 / 断网）时 Pong 停止，约 45s（idle）后下方 ping.tick 触发超时关闭连接。
+        let mut last_activity = std::time::Instant::now();
+        // 信封分片重组缓冲：发送端按 32KB 分片发送，本端按 START(total) + DATA 累加，
+        // 凑齐 total 字节后再反序列化为信封。避免单条超大消息以整帧传输、期间无法穿插
+        // 心跳控制帧，导致弱网下大文件传输被误判断线。
+        let mut asm_total: Option<usize> = None;
+        let mut asm_buf: Vec<u8> = Vec::new();
         loop {
-            let tick = tokio::time::sleep(idle);
             tokio::select! {
                 next = read.next() => {
                     let msg = match next {
                         Some(Ok(m)) => m,
                         _ => break,
                     };
+                    // 收到任何帧都视为连接活跃（大文件传输期间底层仍会回 Pong 控制帧）。
+                    last_activity = std::time::Instant::now();
                     match msg {
                 Message::Text(s) => {
                     // 握手：对端告知其 device_id + 名称，使本端（服务端侧）立即登记「在线」，
@@ -819,7 +850,39 @@ where
                     }
                 }
                 Message::Binary(bytes) => {
-                    let env = match SyncEnvelope::from_bytes(&bytes) {
+                    // 信封分片重组：首字节为帧类型标签。START 携带总长度(u32 BE) + 首片；
+                    // DATA 携带后续分片；按总长度累加，凑齐后再反序列化为信封。
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                    let tag = bytes[0];
+                    if tag == FRAME_START {
+                        if bytes.len() < 5 {
+                            continue;
+                        }
+                        let total = u32::from_be_bytes([
+                            bytes[1], bytes[2], bytes[3], bytes[4],
+                        ]) as usize;
+                        asm_total = Some(total);
+                        asm_buf.clear();
+                        asm_buf.extend_from_slice(&bytes[5..]);
+                    } else if tag == FRAME_DATA {
+                        if asm_total.is_none() {
+                            continue;
+                        }
+                        asm_buf.extend_from_slice(&bytes[1..]);
+                    } else {
+                        continue;
+                    }
+                    // 未凑齐完整信封，等待后续分片。
+                    let need = asm_total.unwrap_or(0);
+                    if asm_buf.len() < need {
+                        continue;
+                    }
+                    let env_bytes = asm_buf[..need].to_vec();
+                    asm_buf.clear();
+                    asm_total = None;
+                    let env = match SyncEnvelope::from_bytes(&env_bytes) {
                         Ok(e) => e,
                         Err(_) => continue,
                     };
@@ -828,6 +891,14 @@ where
                     if learned_id.is_none() {
                         learned_id = Some(rid.clone());
                         register_conn(&inner_r, &app_r, &rid, tx_r.clone()).await;
+                    }
+                    // 按本端「共享类型」白名单过滤：未勾选的类型不入库（在线列表不受影响）。
+                    let allowed = {
+                        let g = inner_r.lock().await;
+                        kind_allowed(&g.config.share_types, env.kind)
+                    };
+                    if !allowed {
+                        continue;
                     }
                     // 解密 + 入库。
                     let outcome = {
@@ -1009,9 +1080,14 @@ where
                 _ => {}
                     }
                 }
-                _ = tick => break,
                 _ = ping.tick() => {
                     let _ = tx_r.send(Message::Ping(Default::default()));
+                    // 仅在「长时间未收到任何消息 / Pong」时判定对端已断线，避免大文件传输
+                    // 期间被误杀：正常连接每 15s 互发 Ping/Pong，即便正忙于接收大消息，
+                    // 底层仍会自动回 Pong，连接活跃度（last_activity）会刷新。
+                    if last_activity.elapsed() > idle {
+                        break;
+                    }
                 }
             }
         }
@@ -1201,6 +1277,61 @@ fn kind_name(k: ClipKind) -> String {
         ClipKind::File => "file",
     }
     .to_string()
+}
+
+/// 判断某类型是否在「共享类型」白名单内。文本 / 链接 / 代码统一归入 `text` 开关；
+/// 图片归 `image`；文件归 `file`。白名单为空（全部取消）时任何类型都不允许。
+fn kind_allowed(share_types: &[String], kind: ClipKind) -> bool {
+    let want = match kind {
+        ClipKind::Image => "image",
+        ClipKind::File => "file",
+        _ => "text",
+    };
+    share_types.iter().any(|t| t == want)
+}
+
+/// 单帧数据负载上限（字节）。将大信封分片为多个小帧，使 Ping/Pong 控制帧可在分片间
+/// 穿插，避免弱网下大文件传输期间连接被心跳误判为断线而中断。
+const LAN_CHUNK: usize = 32 * 1024;
+
+/// 帧类型标签（首字节）：`START` 携带总长度(u32 BE) + 首片；`DATA` 携带后续分片；
+/// 接收端按总长度重组，凑齐后再 `SyncEnvelope::from_bytes`。
+const FRAME_START: u8 = 0x01;
+const FRAME_DATA: u8 = 0x02;
+
+/// 把一条完整信封字节流切分为多帧 `Message::Binary`，供 WebSocket 顺序发送。
+fn build_chunk_frames(data: &[u8]) -> Vec<Message> {
+    let total = (data.len() as u64).min(u32::MAX as u64) as u32;
+    let mut frames: Vec<Message> = Vec::new();
+    let mut offset = 0usize;
+    let mut first = true;
+    while offset < data.len() {
+        let end = (offset + LAN_CHUNK).min(data.len());
+        let chunk = &data[offset..end];
+        let v: Vec<u8> = if first {
+            let mut b = Vec::with_capacity(5 + chunk.len());
+            b.push(FRAME_START);
+            b.extend_from_slice(&total.to_be_bytes());
+            b.extend_from_slice(chunk);
+            b
+        } else {
+            let mut b = Vec::with_capacity(1 + chunk.len());
+            b.push(FRAME_DATA);
+            b.extend_from_slice(chunk);
+            b
+        };
+        frames.push(Message::Binary(v.into()));
+        offset = end;
+        first = false;
+    }
+    // 空数据兜底：保证至少发出一帧 START（total=0），接收端据此正常复位重组状态。
+    if frames.is_empty() {
+        let mut b = Vec::with_capacity(5);
+        b.push(FRAME_START);
+        b.extend_from_slice(&0u32.to_be_bytes());
+        frames.push(Message::Binary(b.into()));
+    }
+    frames
 }
 
 /// 信封类型字符串 -> 模型 `ContentType`（用于构造落库 HistoryItem）。
@@ -1421,6 +1552,39 @@ pub fn text_item(text: &str) -> ClipboardItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_frames_roundtrip_reassembles_envelope() {
+        // 验证大信封分片发送后能被接收端按 START(total)+DATA 完整重组，
+        // 这是「大文件在弱网下也能传完」协议层正确性的核心保障。
+        let data: Vec<u8> = (0u8..=255).cycle().take(200_000).collect();
+        let frames = build_chunk_frames(&data);
+        // 应当被切成多帧（单帧上限 LAN_CHUNK）。
+        assert!(frames.len() > 1, "大信封应被分片");
+
+        let mut asm_total: Option<usize> = None;
+        let mut asm_buf: Vec<u8> = Vec::new();
+        for f in &frames {
+            let Message::Binary(bytes) = f else {
+                panic!("分片应为 Binary");
+            };
+            match bytes[0] {
+                FRAME_START => {
+                    let total = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
+                    asm_total = Some(total);
+                    asm_buf.clear();
+                    asm_buf.extend_from_slice(&bytes[5..]);
+                }
+                FRAME_DATA => {
+                    asm_buf.extend_from_slice(&bytes[1..]);
+                }
+                _ => panic!("未知帧类型"),
+            }
+        }
+        let need = asm_total.unwrap();
+        assert_eq!(asm_buf.len(), need, "重组长度应与声明总长度一致");
+        assert_eq!(asm_buf, data, "重组内容应与原始信封一致");
+    }
 
     #[test]
     fn default_device_name_is_nonempty() {
