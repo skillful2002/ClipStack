@@ -277,6 +277,11 @@ impl LanManager {
         // 设置回环检测用的本机 device_id。
         let dev_id = inner.config.device_id.clone();
         inner.store.set_self_device(dev_id);
+        // 未开启共享：不注册 mDNS / 不监听，避免未共享时被同网发现，
+        // 也确保关闭共享后本机从对端「在线设备」列表消失（而非残留 / 重复）。
+        if !inner.config.share_out {
+            return;
+        }
         if inner.mdns.is_some() {
             return; // 已在运行
         }
