@@ -113,6 +113,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
+        .plugin(tauri_plugin_dialog::init())
         .manage(monitor_state.clone())
         .setup(move |app| {
             // 打开（或创建）SQLite 数据库。
@@ -412,6 +413,7 @@ pub fn run() {
             commands::get_system_info,
             commands::copy_image,
             commands::copy_file,
+            commands::save_item_as,
             commands::was_first_run,
             // ===== P0 · 应用锁 / 主密码 =====
             commands::setup_master_password,

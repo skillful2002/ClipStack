@@ -313,6 +313,129 @@ pub(crate) fn paths_from_storage(blob: Option<&[u8]>, text: &str) -> Vec<PathBuf
         .collect()
 }
 
+/// 另存为：把图片 / 文件保存到用户指定位置。
+/// - image：`content_blob`（PNG 字节）写入 `target` 完整路径。
+/// - file：解析 `content_blob` 的本地路径列表；单文件则复制到 `target`（完整路径）；
+///   多文件或 `target` 为已存在目录时，复制每个文件到 `target` 目录下（文件名冲突加 -1/-2 后缀）。
+#[tauri::command]
+pub fn save_item_as(
+    db: State<'_, DbState>,
+    state: State<'_, AppState>,
+    id: i64,
+    target: String,
+    kind: String,
+) -> Result<String, String> {
+    ensure_unlocked(&state)?;
+    state.touch_activity();
+    let (blob, text) = db::read_item_raw(&db, id, "history")
+        .ok_or_else(|| "该条目不存在".to_string())?;
+    if kind == "image" {
+        let bytes = blob.ok_or_else(|| "该图片无二进制数据".to_string())?;
+        std::fs::write(&target, &bytes).map_err(|e| format!("保存图片失败: {e}"))?;
+        Ok(format!("图片已保存到 {target}"))
+    } else if kind == "file" {
+        let paths = paths_from_storage(blob.as_deref(), &text);
+        if paths.is_empty() {
+            return Err("该条目无可保存的文件路径".to_string());
+        }
+        let target_path = std::path::Path::new(&target);
+        let is_dir_target = target_path.is_dir();
+        if paths.len() == 1 && !is_dir_target {
+            // `std::fs::copy` 只能复制常规文件；源可能是文件夹（复制目录时剪贴板路径即目录），
+            // 此时需递归复制整个目录，否则报 "neither a regular file nor a symlink" 错误。
+            let src = &paths[0];
+            let meta = std::fs::symlink_metadata(src)
+                .map_err(|e| format!("保存失败: 源不存在或无法访问: {e}"))?;
+            if meta.is_dir() {
+                copy_dir_all(src, target_path).map_err(|e| format!("保存文件夹失败: {e}"))?;
+                Ok(format!("文件夹已保存到 {target}"))
+            } else {
+                std::fs::copy(src, target_path).map_err(|e| format!("保存文件失败: {e}"))?;
+                Ok(format!("文件已保存到 {target}"))
+            }
+        } else {
+            std::fs::create_dir_all(target_path).map_err(|e| format!("创建目录失败: {e}"))?;
+            let mut count = 0usize;
+            for src in &paths {
+                let name = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                let dest = unique_save_path(target_path, &name);
+                // 源可能不存在（如 LAN 共享未落盘），跳过而非中断；目录则递归复制。
+                let meta = match std::fs::symlink_metadata(src) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let ok = if meta.is_dir() {
+                    copy_dir_all(src, &dest).is_ok()
+                } else {
+                    std::fs::copy(src, &dest).is_ok()
+                };
+                if ok {
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                return Err("没有文件被保存".to_string());
+            }
+            Ok(format!("已保存 {count} 个文件/文件夹到 {target}"))
+        }
+    } else {
+        Err("仅图片与文件支持另存".to_string())
+    }
+}
+
+/// 递归复制目录（含子目录与文件）到 `dest`；`dest` 不存在则创建。
+/// 用于「另存为」保存剪贴板中的文件夹（目录条目）。
+fn copy_dir_all(src: &std::path::Path, dest: &std::path::Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let ft = entry.file_type()?;
+        let new_dest = dest.join(entry.file_name());
+        if ft.is_dir() {
+            copy_dir_all(&path, &new_dest)?;
+        } else if ft.is_symlink() {
+            // 符号链接按链接本身复制，避免跟随后报错或越界。
+            let _ = std::fs::remove_file(&new_dest);
+            std::fs::copy(&path, &new_dest)?;
+        } else {
+            std::fs::copy(&path, new_dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// 计算不冲突的保存目标路径：文件名已存在时追加 `-1` / `-2` 后缀。
+fn unique_save_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let base = dir.join(name);
+    if !base.exists() {
+        return base;
+    }
+    let stem = base
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = base.extension().map(|e| e.to_string_lossy().into_owned());
+    let mut i = 1u32;
+    loop {
+        let candidate = if let Some(e) = &ext {
+            dir.join(format!("{stem}-{i}.{e}"))
+        } else {
+            dir.join(format!("{stem}-{i}"))
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
 /// 读取条目的二进制内容（图片为 PNG 字节，已解密），用于详情面板预览。
 /// 文本 / 链接 / 代码类条目无二进制，返回错误。
 #[tauri::command]

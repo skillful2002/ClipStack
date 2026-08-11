@@ -25,7 +25,7 @@ export function HistoryList() {
   const search = useHistory((s) => s.search);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
-  const { copy, pin, fav, del, clearFiltered } = useItemActions();
+  const { copy, pin, fav, del, save, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
@@ -89,6 +89,7 @@ export function HistoryList() {
                   selected={it.id === selectedId}
                   onSelect={select}
                   onCopy={copy}
+                  onSave={save}
                   onPin={pin}
                   onFav={fav}
                   onDelete={del}

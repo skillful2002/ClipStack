@@ -930,11 +930,29 @@ where
                                         r.item.payload.len() as i64,
                                     )
                                 } else {
+                                    // 文件：按本端文件大小上限过滤，超过上限的单个文件不落盘（参数双向生效）。
+                                    let limit_bytes = {
+                                        let g = inner_r.lock().await;
+                                        g.config.file_limit_mb.saturating_mul(1024 * 1024)
+                                    };
                                     // 文件：解 bundle 并物理落盘到 `~/.clipstack/share/<YYYY-MM>/`，
                                     // content_text / content_blob 改存本机本地路径，使对端可真正复制使用。
                                     // 旧端兼容：bundle 解析失败（对端为旧版，payload 为 JSON 路径）则按原样存储（本机不可用，仅展示）。
                                     match decode_file_bundle(&r.item.payload) {
                                         Some(entries) => {
+                                            // 按本端文件大小上限过滤：单个文件超过上限则不落盘。
+                                            let mut skipped_files: Vec<String> = Vec::new();
+                                            let entries: Vec<(String, Vec<u8>)> = entries
+                                                .into_iter()
+                                                .filter_map(|(name, data)| {
+                                                    if (data.len() as u64) > limit_bytes {
+                                                        skipped_files.push(name);
+                                                        None
+                                                    } else {
+                                                        Some((name, data))
+                                                    }
+                                                })
+                                                .collect();
                                             let (joined, blob, size) = match app_r.path().home_dir() {
                                                 Ok(home) => {
                                                     // 按当前月份分目录落盘；文件名遇到同名时以 -1 / -2 后缀区分。
@@ -974,6 +992,20 @@ where
                                                     let len = joined.len() as i64;
                                                     (joined, r.item.payload.clone(), len)
                                                 }
+                                            };
+                                            let joined = if joined.is_empty() && !skipped_files.is_empty() {
+                                                format!(
+                                                    "{} 个文件超过本端大小上限({}MB)已跳过",
+                                                    skipped_files.len(),
+                                                    limit_bytes / 1024 / 1024
+                                                )
+                                            } else if !skipped_files.is_empty() {
+                                                format!(
+                                                    "{joined}（{n} 个文件因超本端上限已跳过）",
+                                                    n = skipped_files.len()
+                                                )
+                                            } else {
+                                                joined
                                             };
                                             (joined, Some(blob), size as i64)
                                         }

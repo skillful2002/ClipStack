@@ -1,8 +1,9 @@
-// P3 · 条目操作 hook（复制 / 置顶 / 收藏 / 删除），供列表行与详情面板共用。
+// P3 · 条目操作 hook（复制 / 置顶 / 收藏 / 删除 / 另存），供列表行与详情面板共用。
 
 import { useHistory } from "../store/history";
 import * as api from "./tauri";
 import { useT } from "./i18n";
+import { save as dialogSave, open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import type { HistoryItem } from "../types";
 
 export function useItemActions() {
@@ -30,6 +31,47 @@ export function useItemActions() {
       setToast(t("toast.copied"));
     } catch (e) {
       setToast(t("toast.copyFailed", { error: String(e) }));
+    }
+  };
+
+  const save = async (item: HistoryItem) => {
+    try {
+      if (item.contentType === "image") {
+        // 图片：让用户选择保存路径，由后端从数据库读取 PNG 二进制写入磁盘。
+        const def = `clipstack-${item.id}.png`;
+        const target = await dialogSave({ defaultPath: def });
+        if (!target) return;
+        await api.saveItemAs(item.id, target, "image");
+        setToast(t("toast.saved"));
+      } else if (item.contentType === "file") {
+        // 文件：解析内容中的本地路径列表，单文件让用户选文件名，多文件让用户选目录。
+        const bytes = await api.getItemBlob(item.id);
+        let paths: string[] = [];
+        try {
+          paths = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          // 解析失败则回退到 content_text 按 ", " 拆分
+        }
+        if (!Array.isArray(paths) || paths.length === 0) {
+          paths = item.contentText.split(", ").filter(Boolean);
+        }
+        if (paths.length === 0) {
+          setToast(t("toast.saveNoFile"));
+          return;
+        }
+        let target: string | null = null;
+        if (paths.length === 1) {
+          const name = paths[0].split(/[\\/]/).pop() || "file";
+          target = await dialogSave({ defaultPath: name });
+        } else {
+          target = (await dialogOpen({ directory: true, multiple: false })) as string | null;
+        }
+        if (!target) return;
+        await api.saveItemAs(item.id, target, "file");
+        setToast(t("toast.saved"));
+      }
+    } catch (e) {
+      setToast(t("toast.saveFailed", { error: String(e) }));
     }
   };
 
@@ -105,5 +147,5 @@ export function useItemActions() {
     }
   };
 
-  return { copy, pin, fav, del, restore, purge, emptyTrash, clearFiltered };
+  return { copy, save, pin, fav, del, restore, purge, emptyTrash, clearFiltered };
 }

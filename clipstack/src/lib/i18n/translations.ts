@@ -41,6 +41,7 @@ const zhCN: Dict = {
   "item.unknownSource": "未知来源",
 
   "action.copy": "复制",
+  "action.save": "另存为",
   "action.pin": "置顶",
   "action.unpin": "取消置顶",
   "action.fav": "收藏",
@@ -226,6 +227,8 @@ const zhCN: Dict = {
   "about.back": "返回主界面",
 
   "toast.copied": "已复制到剪贴板",
+  "toast.saved": "已保存到本地",
+  "toast.saveNoFile": "该条目无可保存的文件",
   "toast.copyUnsupported": "该类型暂不支持一键复制",
   "toast.copyFailed": "复制失败：{error}",
   "toast.opFailed": "操作失败：{error}",
@@ -330,6 +333,7 @@ const zhTW: Dict = {
   "item.unknownSource": "未知來源",
 
   "action.copy": "複製",
+  "action.save": "另存為",
   "action.pin": "置頂",
   "action.unpin": "取消置頂",
   "action.fav": "收藏",
@@ -515,6 +519,8 @@ const zhTW: Dict = {
   "about.back": "返回主介面",
 
   "toast.copied": "已複製到剪貼簿",
+  "toast.saved": "已儲存到本機",
+  "toast.saveNoFile": "該項目無可儲存的檔案",
   "toast.copyUnsupported": "該類型暫不支援一鍵複製",
   "toast.copyFailed": "複製失敗：{error}",
   "toast.opFailed": "操作失敗：{error}",
@@ -619,6 +625,7 @@ const en: Dict = {
   "item.unknownSource": "Unknown source",
 
   "action.copy": "Copy",
+  "action.save": "Save As",
   "action.pin": "Pin",
   "action.unpin": "Unpin",
   "action.fav": "Favorite",
@@ -804,6 +811,8 @@ const en: Dict = {
   "about.back": "Back to Main",
 
   "toast.copied": "Copied to clipboard",
+  "toast.saved": "Saved to local file",
+  "toast.saveNoFile": "No file available to save",
   "toast.copyUnsupported": "One-click copy is not supported for this type yet",
   "toast.copyFailed": "Copy failed: {error}",
   "toast.opFailed": "Operation failed: {error}",
@@ -908,6 +917,7 @@ const ja: Dict = {
   "item.unknownSource": "不明なソース",
 
   "action.copy": "コピー",
+  "action.save": "名前を付けて保存",
   "action.pin": "ピン留め",
   "action.unpin": "ピン留め解除",
   "action.fav": "お気に入り",
@@ -1093,6 +1103,8 @@ const ja: Dict = {
   "about.back": "メインに戻る",
 
   "toast.copied": "クリップボードにコピーしました",
+  "toast.saved": "ローカルに保存しました",
+  "toast.saveNoFile": "保存できるファイルがありません",
   "toast.copyUnsupported": "この種類はワンクリックコピーに対応していません",
   "toast.copyFailed": "コピーに失敗しました: {error}",
   "toast.opFailed": "操作に失敗しました: {error}",
@@ -1197,6 +1209,7 @@ const de: Dict = {
   "item.unknownSource": "Unbekannte Quelle",
 
   "action.copy": "Kopieren",
+  "action.save": "Speichern unter",
   "action.pin": "Anheften",
   "action.unpin": "Loslösen",
   "action.fav": "Favorit",
@@ -1382,6 +1395,8 @@ const de: Dict = {
   "about.back": "Zurück zum Hauptfenster",
 
   "toast.copied": "In die Zwischenablage kopiert",
+  "toast.saved": "Lokal gespeichert",
+  "toast.saveNoFile": "Keine Datei zum Speichern vorhanden",
   "toast.copyUnsupported": "Dieser Typ unterstützt das Kopieren per Klick noch nicht",
   "toast.copyFailed": "Kopieren fehlgeschlagen: {error}",
   "toast.opFailed": "Vorgang fehlgeschlagen: {error}",
@@ -1486,6 +1501,7 @@ const fr: Dict = {
   "item.unknownSource": "Source inconnue",
 
   "action.copy": "Copier",
+  "action.save": "Enregistrer sous",
   "action.pin": "Épingler",
   "action.unpin": "Désépingler",
   "action.fav": "Favori",
@@ -1671,6 +1687,8 @@ const fr: Dict = {
   "about.back": "Retour à la fenêtre principale",
 
   "toast.copied": "Copié dans le presse-papiers",
+  "toast.saved": "Enregistré localement",
+  "toast.saveNoFile": "Aucun fichier à enregistrer",
   "toast.copyUnsupported": "La copie en un clic n'est pas prise en charge pour ce type",
   "toast.copyFailed": "Échec de la copie : {error}",
   "toast.opFailed": "Échec de l'opération : {error}",

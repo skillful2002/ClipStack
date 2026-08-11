@@ -29,6 +29,7 @@ image = "0.25"                       # 把截图软件写入的 BMP/CF_BITMAP/CF
 clipboard-win = "5"                  # 直接读 arboard 3.x 未覆盖的 CF_BITMAP / CF_DIB 剪贴板图片格式（Windows）
 tauri-plugin-global-shortcut = "2"  # P4 全局快捷键（唤起主界面）
 tauri-plugin-autostart = "2"        # P6 开机自启开关
+tauri-plugin-dialog = "2"           # 另存为：系统文件 / 目录选择对话框
 
 # ===== 局域网共享（L2/L3，见 clipstack-lan-sync-design.md）=====
 clipstack-protocol = { path = "../../clipstack-protocol" }  # 共享协议库

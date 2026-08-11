@@ -4,13 +4,14 @@ import type { HistoryItem } from "../types";
 import { TYPE_META, relativeTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { ACTION_SHORTCUTS } from "../lib/shortcuts";
-import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
+import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon } from "./icons";
 
 interface Props {
   item: HistoryItem;
   selected: boolean;
   onSelect: (id: number) => void;
   onCopy: (item: HistoryItem) => void;
+  onSave: (item: HistoryItem) => void;
   onPin: (item: HistoryItem) => void;
   onFav: (item: HistoryItem) => void;
   onDelete: (item: HistoryItem) => void;
@@ -21,6 +22,7 @@ export function HistoryItemRow({
   selected,
   onSelect,
   onCopy,
+  onSave,
   onPin,
   onFav,
   onDelete,
@@ -69,6 +71,11 @@ export function HistoryItemRow({
         <button title={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`} onClick={() => onCopy(item)}>
           <CopyIcon size={15} />
         </button>
+        {(item.contentType === "image" || item.contentType === "file") && (
+          <button title={t("action.save")} onClick={() => onSave(item)}>
+            <SaveIcon size={15} />
+          </button>
+        )}
         <button title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`} onClick={() => onPin(item)}>
           <PinIcon size={15} active={item.isPinned} />
         </button>

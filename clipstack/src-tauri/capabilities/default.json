@@ -8,6 +8,8 @@
     "autostart:default",
     "core:window:allow-theme",
     "core:window:allow-set-theme",
-    "core:window:allow-hide"
+    "core:window:allow-hide",
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

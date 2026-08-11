@@ -61,6 +61,14 @@ export const copyImage = (id: number): Promise<void> =>
 export const copyFile = (id: number): Promise<void> =>
   invoke<void>("copy_file", { id });
 
+/** 另存为：把图片/文件保存到指定路径（image 为完整文件路径；file 单文件为完整路径，多文件 target 为目录）。 */
+export const saveItemAs = (
+  id: number,
+  target: string,
+  kind: string,
+): Promise<string> =>
+  invoke<string>("save_item_as", { id, target, kind });
+
 /** 读取全部设置项。 */
 export const getSettings = (): Promise<Setting[]> =>
   invoke<Setting[]>("get_settings");
