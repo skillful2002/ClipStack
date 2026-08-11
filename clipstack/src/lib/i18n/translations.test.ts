@@ -33,6 +33,7 @@ const LAN_KEYS = [
   "lan.thisDevice",
   "lan.sharing",
   "lan.shareStopped",
+  "lan.save",
   "lan.noOtherPeers",
   "lan.testSend",
   "lan.testing",

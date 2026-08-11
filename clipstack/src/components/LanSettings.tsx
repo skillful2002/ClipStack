@@ -234,7 +234,7 @@ export function LanSettings() {
 
         <div className="settings-actions">
           <button className="primary" disabled={busy} onClick={() => void onSave()}>
-            {t("settings.add")}
+            {t("lan.save")}
           </button>
           <button disabled={testing} onClick={() => void onTest()}>
             {testing ? t("lan.testing") : t("lan.testSend")}
