@@ -245,6 +245,9 @@ struct Inner {
 #[derive(Clone)]
 pub struct LanManager {
     inner: Arc<Mutex<Inner>>,
+    /// 共享发布开关的原子镜像：供托盘菜单等同步上下文无锁读取，
+    /// 避免在非异步线程 `block_on(config())` 造成嵌套阻塞 / panic。
+    share_out_flag: Arc<AtomicBool>,
     app: AppHandle,
 }
 
@@ -254,6 +257,7 @@ impl LanManager {
         // 载入持久化的全部局域网共享配置（组/密钥/设备名/发布开关/文件上限/手动对端/端口）。
         load_persisted_config(&db, &mut cfg);
         let psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
+        let share_out = cfg.share_out;
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 config: cfg,
@@ -267,6 +271,7 @@ impl LanManager {
                 db,
                 server_task: None,
             })),
+            share_out_flag: Arc::new(AtomicBool::new(share_out)),
             app,
         }
     }
@@ -422,6 +427,8 @@ impl LanManager {
             inner.config = cfg.clone();
             inner.psk = crypto::derive_psk(&cfg.share_group, &cfg.share_key);
             inner.store.set_self_device(cfg.device_id.clone());
+            // 同步更新原子镜像，供托盘菜单等同步读取（与 set_share_out 保持一致）。
+            self.share_out_flag.store(cfg.share_out, Ordering::SeqCst);
             // 持久化全部配置（含密钥包装），重启后仍生效。
             persist_config(&inner.db, &cfg);
         }
@@ -538,15 +545,35 @@ impl LanManager {
     }
 
     /// L3 · 切换发布开关（不影响 mDNS 指纹，无需重启发现）。
+    /// 同步读取当前「共享发布」开关状态。
+    /// 供托盘菜单重建（build_menu 可能在事件监听线程调用）读取，避免在非异步上下文
+    /// 使用 `block_on(config())` 造成潜在嵌套 block_on 风险。
+    pub fn is_share_out(&self) -> bool {
+        self.share_out_flag.load(Ordering::SeqCst)
+    }
+
     pub async fn set_share_out(&self, enabled: bool) {
-        let db = {
+        let changed = {
             let mut inner = self.inner.lock().await;
-            inner.config.share_out = enabled;
-            inner.db.clone()
+            if inner.config.share_out == enabled {
+                // 已是目标状态，无需改动（也避免无谓的 stop/start）。
+                false
+            } else {
+                inner.config.share_out = enabled;
+                // 同步更新原子镜像，供托盘菜单等同步读取。
+                self.share_out_flag.store(enabled, Ordering::SeqCst);
+                // 仅开关变更也要持久化，否则重启后回退。
+                persist_config(&inner.db, &inner.config);
+                true
+            }
         };
-        // 仅发布开关变更也要持久化，否则重启后回退。
-        let cfg = self.config().await;
-        persist_config(&db, &cfg);
+        if changed {
+            // 重启发现 / 监听，使开关真正生效（与 set_config 中 share_out 变化的路径一致）。
+            self.stop().await;
+            self.start().await;
+            // 通知前端立即同步开关状态（主要服务「托盘切换共享」场景）。
+            let _ = self.app.emit("lan-config-changed", ());
+        }
     }
 
     pub async fn config(&self) -> LanConfig {

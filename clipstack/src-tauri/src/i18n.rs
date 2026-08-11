@@ -110,6 +110,42 @@ pub fn tray_help(lang: Lang) -> &'static str {
     }
 }
 
+/// 托盘菜单「共享」开关标签（带状态圆点图标）。
+pub fn tray_share(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "共享",
+        Lang::ZhTw => "共享",
+        Lang::En => "Share",
+        Lang::Ja => "共有",
+        Lang::De => "Teilen",
+        Lang::Fr => "Partager",
+    }
+}
+
+/// 托盘「共享」开启时的状态提示（显示状态并提示点击切换）。
+pub fn tray_share_on(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "已开启 · 点击关闭",
+        Lang::ZhTw => "已開啟 · 點擊關閉",
+        Lang::En => "On · click to stop",
+        Lang::Ja => "オン · クリックで停止",
+        Lang::De => "Ein · zum Stoppen klicken",
+        Lang::Fr => "Activé · cliquer pour arrêter",
+    }
+}
+
+/// 托盘「共享」关闭时的状态提示（显示状态并提示点击切换）。
+pub fn tray_share_off(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "已关闭 · 点击开启",
+        Lang::ZhTw => "已關閉 · 點擊開啟",
+        Lang::En => "Off · click to start",
+        Lang::Ja => "オフ · クリックで開始",
+        Lang::De => "Aus · zum Starten klicken",
+        Lang::Fr => "Désactivé · cliquer pour démarrer",
+    }
+}
+
 /// 托盘菜单「退出」标签（PredefinedMenuItem::quit 的自定义文案）。
 pub fn tray_quit(lang: Lang) -> &'static str {
     match lang {

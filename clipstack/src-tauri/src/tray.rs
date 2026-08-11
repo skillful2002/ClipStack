@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::AppState;
-use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_quit, tray_settings, Lang, MenuLang};
+use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_quit, tray_settings, tray_share, tray_share_off, tray_share_on, Lang, MenuLang};
+use crate::lan::LanManager;
 use crate::models::ContentType;
 use crate::set_dock_visible;
 
@@ -96,6 +97,13 @@ fn build_menu(
     drop(key_guard);
     drop(conn);
 
+    // 局域网共享当前开关状态（用于「共享」菜单项的状态圆点）。
+    // 用同步 getter 读取，避免在非异步上下文 block_on 造成嵌套阻塞/panic。
+    let lan_on = app
+        .try_state::<LanManager>()
+        .map(|m| m.is_share_out())
+        .unwrap_or(false);
+
     if locked {
         // 锁定态：仅给一个「点击解锁」占位项，绝不泄露明文或密文。
         let item = MenuItem::with_id(app, "unlock", tray_locked(lang), true, None::<&str>)?;
@@ -147,9 +155,27 @@ fn build_menu(
                 .build(app)?,
         )?;
     }
-    // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
+    // 「设置」与「共享 / 帮助」之间以横线分隔。
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    // 「设置」与「关于系统」之间以横线分隔，两组功能区分更清晰。
+    // 共享开关：小圆点指示当前状态（亮=已开启，暗=已关闭），点击切换 share_out。
+    // 菜单项 id 带上当前状态，确保切换后图标以「全新原生项」呈现，避免 macOS 按 id
+    // 复用旧 NSMenuItem 而保留旧图标（表现为圆点不变色）。
+    // 标题用制表符分隔：左侧「共享」、右侧「已开启/已关闭 · 点击...」状态提示。
+    let share_item_id = if lan_on { "toggle_share:on" } else { "toggle_share:off" };
+    let share_label = format!(
+        "{}\t{}",
+        tray_share(lang),
+        if lan_on {
+            tray_share_on(lang)
+        } else {
+            tray_share_off(lang)
+        }
+    );
+    menu.append(
+        &IconMenuItemBuilder::with_id(share_item_id, share_label)
+            .icon(dot_icon(lan_on))
+            .build(app)?,
+    )?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(
         &IconMenuItemBuilder::with_id("help", tray_help(lang))
@@ -285,6 +311,15 @@ fn handle_menu_event(
             set_dock_visible(app);
             let _ = app.emit("show-view", "about");
         }
+        // 共享菜单项 id 带状态后缀（toggle_share:on / :off），此处按前缀匹配。
+        id if id.starts_with("toggle_share") => {
+            // 托盘「共享」开关：读取当前状态并取反，切换 share_out（会热重启发现）。
+            if let Some(mgr) = app.try_state::<LanManager>() {
+                let on = mgr.is_share_out();
+                tauri::async_runtime::block_on(mgr.set_share_out(!on));
+            }
+            let _ = app.emit("refresh-tray", ());
+        }
         "tray_lock" => {
             // 托盘「锁定」菜单：立即锁定应用。
             state.set_locked(true);
@@ -307,6 +342,35 @@ fn type_tray_icon(ct: ContentType) -> Result<Image<'static>, Box<dyn std::error:
         _ => ICON_TEXT, // text；file 在托盘历史中已排除，fallback 为文本图标
     };
     Ok(Image::from_bytes(bytes)?)
+}
+
+/// 生成带状态指示小圆点的 RGBA 图标（16×16），供托盘「共享」菜单项使用。
+/// `on=true` 亮绿点（已开启），`on=false` 暗灰半透明点（已关闭）；圆点居中，其余透明。
+fn dot_icon(on: bool) -> Image<'static> {
+    let size = 16u32;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let (r, g, b, a) = if on {
+        (52u8, 199u8, 89u8, 255u8) // macOS 系统绿，亮
+    } else {
+        (120u8, 120u8, 128u8, 150u8) // 暗灰半透明
+    };
+    let cx = size as f32 / 2.0 - 0.5;
+    let cy = size as f32 / 2.0 - 0.5;
+    let radius = 5.0f32;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            if dx * dx + dy * dy <= radius * radius {
+                let idx = ((y * size + x) * 4) as usize;
+                rgba[idx] = r;
+                rgba[idx + 1] = g;
+                rgba[idx + 2] = b;
+                rgba[idx + 3] = a;
+            }
+        }
+    }
+    Image::new_owned(rgba, size, size)
 }
 
 /// 截断过长的预览文本，超出部分以省略号结尾。

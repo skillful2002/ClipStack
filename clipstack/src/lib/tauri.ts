@@ -309,3 +309,8 @@ export const onLanPortInUse = (
   cb: (payload: PortInUsePayload) => void,
 ): Promise<UnlistenFn> =>
   listen<PortInUsePayload>("lan-port-in-use", (event) => cb(event.payload));
+
+/** 订阅局域网配置变更事件（如托盘切换共享开关），返回取消订阅函数。
+ *  前端据此重新拉取配置，保持「共享」开关与在线状态与后端一致。 */
+export const onLanConfigChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("lan-config-changed", () => cb());

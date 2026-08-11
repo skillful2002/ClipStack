@@ -47,32 +47,35 @@ export function LanSettings() {
     }
   };
 
-  // 初始化：读取当前配置 + 在线设备，并订阅上下线 / 收到共享事件。
+  // 从后端重新拉取完整配置并刷新本地状态（挂载时与「托盘切换共享」等后端主动变更时复用）。
+  const refreshConfig = async () => {
+    try {
+      const cfg = await api.lanGetConfig();
+      setDeviceId(cfg.deviceId);
+      setGroup(cfg.group);
+      setName(cfg.name);
+      setShareOut(cfg.shareOut);
+      setFileLimitMb(cfg.fileLimitMb);
+      setShareTypes(
+        cfg.shareTypes && cfg.shareTypes.length > 0
+          ? cfg.shareTypes.filter((x) => (SHARE_TYPES as readonly string[]).includes(x))
+          : [...SHARE_TYPES],
+      );
+      setHasKey(cfg.hasKey);
+      setPort(cfg.port);
+      setListenPort(cfg.port);
+      setLocalIp(cfg.localIp);
+      setManualPeers(cfg.manualPeers.join("\n"));
+    } catch (e) {
+      setToast(t("lan.saveFailed", { error: String(e) }));
+    }
+    await refreshPeers();
+    await refreshShareFiles();
+  };
+
+  // 初始化：读取当前配置 + 在线设备，并订阅上下线 / 收到共享 / 后端配置变更事件。
   useEffect(() => {
-    void (async () => {
-      try {
-        const cfg = await api.lanGetConfig();
-        setDeviceId(cfg.deviceId);
-        setGroup(cfg.group);
-        setName(cfg.name);
-        setShareOut(cfg.shareOut);
-        setFileLimitMb(cfg.fileLimitMb);
-        setShareTypes(
-          cfg.shareTypes && cfg.shareTypes.length > 0
-            ? cfg.shareTypes.filter((x) => (SHARE_TYPES as readonly string[]).includes(x))
-            : [...SHARE_TYPES],
-        );
-        setHasKey(cfg.hasKey);
-        setPort(cfg.port);
-        setListenPort(cfg.port);
-        setLocalIp(cfg.localIp);
-        setManualPeers(cfg.manualPeers.join("\n"));
-      } catch (e) {
-        setToast(t("lan.saveFailed", { error: String(e) }));
-      }
-      await refreshPeers();
-      await refreshShareFiles();
-    })();
+    void refreshConfig();
 
     const unlisteners = Promise.all([
       api.onLanPeerOnline((p) => setPeers((prev) => upsertPeer(prev, p))),
@@ -87,6 +90,10 @@ export function LanSettings() {
       api.onLanPortInUse((payload) => {
         setPortError(t("lan.portInUse", { port: payload.port }));
         setToast(t("lan.portInUse", { port: payload.port }));
+      }),
+      // 后端配置被外部变更（如托盘菜单切换「共享」开关）时，重新拉取以实时同步 UI。
+      api.onLanConfigChanged(() => {
+        void refreshConfig();
       }),
     ]);
     return () => {
