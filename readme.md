@@ -7,7 +7,7 @@ ClipStack 是一款常驻后台的**跨平台剪贴板管理工具**，支持 ma
 支持多种语言：简体中文、繁体中文、英文、日文、德文、法文。
 
 - 应用标识：`tech.newxin-clipstack.app`
-- 当前版本：`0.1.2`
+- 当前版本：`0.2.0-lan`
 - 技术栈：Tauri 2 + React 18 + TypeScript + Vite + Rust（SQLite 持久化）
 
 ---

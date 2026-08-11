@@ -106,6 +106,11 @@ export function HelpView() {
 
         <Section title={t("help.sync")}>
           <p className="help-p">{t("help.syncText")}</p>
+          <ul className="help-ul">
+            <li>{t("help.lanPrereq")}</li>
+            <li>{t("help.lanTray")}</li>
+            <li>{t("help.lanSaveAs")}</li>
+          </ul>
         </Section>
 
         <Section title={t("help.source")}>
