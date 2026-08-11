@@ -955,25 +955,69 @@ where
                                                 .collect();
                                             let (joined, blob, size) = match app_r.path().home_dir() {
                                                 Ok(home) => {
-                                                    // 按当前月份分目录落盘；文件名遇到同名时以 -1 / -2 后缀区分。
+                                                    // 按当前月份分目录落盘；条目 name 可能含子目录（目录包），
+                                                    // 据此重建层级；顶层名冲突时加 -1/-2 后缀避免覆盖。
                                                     let dir = share_month_dir(&home);
                                                     let _ = std::fs::create_dir_all(&dir);
                                                     let mut local_paths: Vec<String> = Vec::new();
+                                                    let mut used_tops: std::collections::HashSet<String> =
+                                                        std::collections::HashSet::new();
+                                                    // 同一顶层目录（目录包）的所有条目必须映射到同一个去重名，
+                                                    // 否则目录内文件会被拆到不同目录。
+                                                    let mut top_map: std::collections::HashMap<String, String> =
+                                                        std::collections::HashMap::new();
                                                     let mut total: u64 = 0;
                                                     for (name, data) in entries {
-                                                        // name 来自网络，仅取文件名校验分量，防目录穿越。
-                                                        let fname = std::path::Path::new(&name)
-                                                            .file_name()
-                                                            .map(|n| n.to_string_lossy().into_owned())
-                                                            .unwrap_or_default();
-                                                        if fname.is_empty() {
+                                                        // 防目录穿越：拒绝绝对路径与 ".." 分量。
+                                                        if name.starts_with('/') {
                                                             continue;
                                                         }
-                                                        let dest = unique_share_path(&dir, &fname);
+                                                        let rel = name.replace('\\', "/");
+                                                        if rel.split('/').any(|c| c == "..") {
+                                                            continue;
+                                                        }
+                                                        // 顶层段（目录包为目录名、单文件为文件名）去重。
+                                                        let top =
+                                                            rel.split('/').next().unwrap_or(&rel).to_string();
+                                                        let unique_top = if let Some(u) = top_map.get(&top) {
+                                                            u.clone()
+                                                        } else {
+                                                            let u = unique_share_name(&dir, &top, &mut used_tops);
+                                                            top_map.insert(top.clone(), u.clone());
+                                                            u
+                                                        };
+                                                        // 将 rel 的顶层段替换为去重后的版本，保留子目录层级。
+                                                        let rel_unique = if unique_top == top {
+                                                            rel.clone()
+                                                        } else {
+                                                            let rest: Vec<&str> =
+                                rel.split('/').skip(1).collect();
+                                                            if rest.is_empty() {
+                                                                unique_top.clone()
+                                                            } else {
+                                                                format!("{}/{}", unique_top, rest.join("/"))
+                                                            }
+                                                        };
+                                                        let dest = dir.join(&rel_unique);
+                                                        if let Some(parent) = dest.parent() {
+                                                            let _ = std::fs::create_dir_all(parent);
+                                                        }
                                                         if std::fs::write(&dest, &data).is_ok() {
                                                             total += data.len() as u64;
-                                                            local_paths
-                                                                .push(dest.to_string_lossy().into_owned());
+                                                            // 含子目录则记录顶层目录（便于「另存为」整体复制），
+                                                            // 否则记录文件本身。
+                                                            if rel.contains('/') {
+                                                                let tp = dir
+                                                                    .join(&unique_top)
+                                                                    .to_string_lossy()
+                                                                    .into_owned();
+                                                                if !local_paths.contains(&tp) {
+                                                                    local_paths.push(tp);
+                                                                }
+                                                            } else {
+                                                                local_paths
+                                                                    .push(dest.to_string_lossy().into_owned());
+                                                            }
                                                         } else {
                                                             eprintln!("[lan] 写入共享文件失败: {dest:?}");
                                                         }
@@ -1395,26 +1439,24 @@ fn share_month_dir(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".clipstack").join("share").join(current_utc_month())
 }
 
-/// 计算共享文件的落盘路径：若 `dir/fname` 已存在，则按 `stem-1.ext` / `stem-2.ext`
-/// 顺序寻找未占用名，避免直接覆盖同名文件。
-fn unique_share_path(dir: &std::path::Path, fname: &str) -> std::path::PathBuf {
-    let candidate = dir.join(fname);
-    if !candidate.exists() {
-        return candidate;
+/// 计算共享目录下的不冲突顶层名（文件或目录）：若 `dir/name` 已存在或已在本批次占用，
+/// 则按 `name-1` / `name-2` 顺序寻找未占用名。`used` 跨本批次条目共享，避免同包内重复分配。
+fn unique_share_name(
+    dir: &std::path::Path,
+    name: &str,
+    used: &mut std::collections::HashSet<String>,
+) -> String {
+    let cand = dir.join(name);
+    if !cand.exists() && used.insert(name.to_string()) {
+        return name.to_string();
     }
-    let path = std::path::Path::new(fname);
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| fname.to_string());
-    let ext = path
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()));
+    used.remove(name); // 上面仅当已存在时才可能误插入，撤销
     let mut n: u32 = 1;
     loop {
-        let candidate = dir.join(format!("{}-{}{}", stem, n, ext.clone().unwrap_or_default()));
-        if !candidate.exists() {
-            return candidate;
+        let cand_name = format!("{name}-{n}");
+        let cand = dir.join(&cand_name);
+        if !cand.exists() && used.insert(cand_name.clone()) {
+            return cand_name;
         }
         n += 1;
     }
@@ -1543,6 +1585,13 @@ fn build_file_entries(json_paths: &Option<Vec<u8>>, limit_bytes: u64) -> Vec<(St
             eprintln!("[lan] 共享文件不存在，跳过: {p}");
             continue;
         };
+        if meta.is_dir() {
+            // 目录（如 macOS 的 .rtfd / .app 包，Finder 显示为单个文件）无法用 std::fs::read
+            // 直接读取，需递归拍平为多条条目；name 用相对目录的路径（含顶层目录名），
+            // 对端据此在本地 share 目录重建层级结构。
+            collect_dir_entries(path, path, limit_bytes, &mut out);
+            continue;
+        }
         if meta.len() > limit_bytes {
             eprintln!(
                 "[lan] 共享文件超过大小上限({}MB)，跳过: {p}",
@@ -1564,6 +1613,58 @@ fn build_file_entries(json_paths: &Option<Vec<u8>>, limit_bytes: u64) -> Vec<(St
         out.push((name, bytes));
     }
     out
+}
+
+/// 递归收集目录内常规文件为传输条目。
+/// `root` 为被共享的目录本身；条目 `name` 取相对 `root.parent()` 的路径（含顶层目录名，
+/// 如 `activiti.rtfd/TXT.rtf`），对端按此重建目录结构。
+/// 单个文件超过 `limit_bytes` 则跳过；符号链接按目标内容读取（仅常规文件入列）。
+fn collect_dir_entries(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    limit_bytes: u64,
+    out: &mut Vec<(String, Vec<u8>)>,
+) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    // 顶层目录名保留：相对 root 的父目录取路径。
+    let base = root.parent().unwrap_or_else(|| std::path::Path::new(""));
+    for entry in rd.flatten() {
+        let p = entry.path();
+        let Ok(ft) = entry.file_type() else { continue };
+        let rel = match p.strip_prefix(base) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        };
+        if rel.is_empty() {
+            continue;
+        }
+        if ft.is_dir() {
+            collect_dir_entries(root, &p, limit_bytes, out);
+        } else if ft.is_symlink() {
+            if let Ok(bytes) = std::fs::read(&p) {
+                if (bytes.len() as u64) <= limit_bytes {
+                    out.push((rel, bytes));
+                }
+            }
+        } else if ft.is_file() {
+            let Ok(meta) = p.metadata() else { continue };
+            if (meta.len() as u64) > limit_bytes {
+                eprintln!(
+                    "[lan] 共享文件超过大小上限({}MB)，跳过: {rel}",
+                    limit_bytes / 1024 / 1024
+                );
+                continue;
+            }
+            if let Ok(bytes) = std::fs::read(&p) {
+                out.push((rel, bytes));
+            }
+        }
+    }
 }
 
 /// 由文本构造一条待广播的 ClipboardItem（测试 / L3 监控钩子复用）。
@@ -1713,6 +1814,36 @@ mod tests {
         assert!(decode_file_bundle(&json).is_none());
         assert!(decode_file_bundle(&[]).is_none());
         assert!(decode_file_bundle(&[1, 2, 3]).is_none());
+    }
+
+    #[test]
+    fn build_file_entries_flattens_directory_with_subpaths() {
+        // 目录（如 macOS .rtfd 包）曾因 std::fs::read 失败被整体跳过 → 对端收到空 bundle。
+        // 修复后：递归拍平为多条条目，name 保留含顶层目录名的相对路径。
+        use std::io::Write;
+        let base = std::env::temp_dir().join(format!("clipstack_lan_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let pkg = base.join("demo.rtfd");
+        std::fs::create_dir_all(pkg.join("sub")).unwrap();
+        let mut f1 = std::fs::File::create(pkg.join("TXT.rtf")).unwrap();
+        f1.write_all(b"hello").unwrap();
+        let mut f2 = std::fs::File::create(pkg.join("sub").join("img.png")).unwrap();
+        f2.write_all(b"PNGDATA").unwrap();
+
+        let json = serde_json::to_vec(&vec![pkg.to_string_lossy().to_string()]).unwrap();
+        let entries = build_file_entries(&Some(json), 10 * 1024 * 1024);
+        // 两个文件都应被拍平，且 name 含顶层目录名与相对层级。
+        assert_eq!(entries.len(), 2);
+        let names: Vec<String> = entries.iter().map(|(n, _)| n.clone()).collect();
+        assert!(names.iter().any(|n| n == "demo.rtfd/TXT.rtf"));
+        assert!(names.iter().any(|n| n == "demo.rtfd/sub/img.png"));
+        // 解码后子路径应完整保留（接收端据此重建目录）。
+        let bundle = encode_file_bundle(&entries);
+        let back = decode_file_bundle(&bundle).expect("bundle 应可解码");
+        let back_names: Vec<String> = back.iter().map(|(n, _)| n.clone()).collect();
+        assert!(back_names.iter().any(|n| n == "demo.rtfd/TXT.rtf"));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
