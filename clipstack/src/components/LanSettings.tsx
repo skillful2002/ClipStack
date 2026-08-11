@@ -95,13 +95,16 @@ export function LanSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 仅更新本地状态；是否共享与其它共享参数统一在「立即生效」时落库，
-  // 避免未点保存就已对局域网广播。
-  const onShareOutChange = (next: boolean) => {
-    setShareOut(next);
-  };
-
-  const onSave = async () => {
+  // 将当前共享配置提交到后端。可传入覆盖项（如切换开关、即时修改文件上限/共享类型）。
+  // 「是否共享」开关的每次切换都直接走这里：一并提交全部配置并启停共享，无需额外按钮。
+  const applyConfig = async (
+    override?: {
+      shareOut?: boolean;
+      fileLimitMb?: number;
+      shareTypes?: string[];
+    },
+    silent = false,
+  ) => {
     setBusy(true);
     try {
       const peersList = manualPeers
@@ -112,21 +115,27 @@ export function LanSettings() {
         group: group.trim(),
         key: key, // 留空 = 保持现有密钥
         name: name.trim(),
-        shareOut,
-        fileLimitMb: Math.max(1, Math.min(1024, fileLimitMb || 10)),
-        shareTypes,
+        shareOut: override?.shareOut ?? shareOut,
+        fileLimitMb: Math.max(1, Math.min(1024, override?.fileLimitMb ?? (fileLimitMb || 10))),
+        shareTypes: override?.shareTypes ?? shareTypes,
         manualPeers: peersList,
         port: listenPort || 0, // 0 由后端回退为默认 LAN_PORT
       });
-      setHasKey(true); // 保存后视为已设（除非组/密钥被清空）
+      setHasKey(true); // 提交后视为已设（除非组/密钥被清空）
       setPortError("");
-      setToast(t("lan.saved"));
+      if (!silent) setToast(t("lan.saved"));
       await refreshPeers();
     } catch (e) {
       setToast(t("lan.saveFailed", { error: String(e) }));
     } finally {
       setBusy(false);
     }
+  };
+
+  // 「是否共享」开关：切换即立即生效（提交全部配置并启停共享）。
+  const onShareOutChange = (next: boolean) => {
+    setShareOut(next);
+    void applyConfig({ shareOut: next });
   };
 
   const onTest = async () => {
@@ -318,7 +327,12 @@ export function LanSettings() {
             min={1}
             max={1024}
             value={fileLimitMb}
-            onChange={(e) => setFileLimitMb(Number(e.target.value))}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setFileLimitMb(v);
+              // 共享开启时文件上限改动即时生效（静默，避免每次按键弹提示）。
+              if (shareOut) void applyConfig({ fileLimitMb: v }, true);
+            }}
           />
         </div>
 
@@ -335,6 +349,8 @@ export function LanSettings() {
                       ? [...shareTypes, tp]
                       : shareTypes.filter((x) => x !== tp);
                     setShareTypes(next);
+                    // 共享开启时共享类型改动即时生效（静默）。
+                    if (shareOut) void applyConfig({ shareTypes: next }, true);
                   }}
                 />
                 <span>{t(`type.${tp}`)}</span>
@@ -363,9 +379,6 @@ export function LanSettings() {
         </div>
 
         <div className="settings-actions">
-          <button className="primary" disabled={busy} onClick={() => void onSave()}>
-            {t("lan.applyNow")}
-          </button>
           <button disabled={testing} onClick={() => void onTest()}>
             {testing ? t("lan.testing") : t("lan.testSend")}
           </button>
