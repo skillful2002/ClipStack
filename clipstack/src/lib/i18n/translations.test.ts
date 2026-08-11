@@ -48,6 +48,15 @@ const LAN_KEYS = [
   "lan.shareTypes",
   "lan.shareTypesHint",
   "lan.applyNow",
+  "lan.shareFiles",
+  "lan.shareFilesStat",
+  "lan.shareFilesLocation",
+  "lan.openShareFolder",
+  "lan.clearShareFiles",
+  "lan.clearShareConfirm",
+  "lan.shareFilesEmpty",
+  "lan.clearShareDone",
+  "lan.operationFailed",
   "item.local",
 ];
 

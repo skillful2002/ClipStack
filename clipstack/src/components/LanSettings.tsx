@@ -33,6 +33,9 @@ export function LanSettings() {
   const [peers, setPeers] = useState<api.PeerInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  // 共享文件统计 [文件数, 总字节数] 与保存位置。
+  const [shareStats, setShareStats] = useState<[number, number]>([0, 0]);
+  const [shareFolderPath, setShareFolderPath] = useState("");
 
   const refreshPeers = async () => {
     try {
@@ -66,6 +69,7 @@ export function LanSettings() {
         setToast(t("lan.saveFailed", { error: String(e) }));
       }
       await refreshPeers();
+      await refreshShareFiles();
     })();
 
     const unlisteners = Promise.all([
@@ -133,6 +137,56 @@ export function LanSettings() {
       setToast(t("lan.testFailed", { error: String(e) }));
     } finally {
       setTesting(false);
+    }
+  };
+
+  // 字节数 -> 人类可读（B / KB / MB / GB）。
+  const formatBytes = (n: number): string => {
+    if (n < 1024) return `${n} B`;
+    const kb = n / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(1)} MB`;
+    return `${(mb / 1024).toFixed(2)} GB`;
+  };
+
+  // 刷新共享文件统计与保存位置。
+  const refreshShareFiles = async () => {
+    try {
+      const [count, size] = await api.lanShareStats();
+      setShareStats([count, size]);
+      setShareFolderPath(await api.lanShareFolderPath());
+    } catch {
+      /* 不可用时静默 */
+    }
+  };
+
+  // 在文件管理器中打开共享文件夹。
+  const onOpenShareFolder = async () => {
+    try {
+      await api.lanOpenShareFolder();
+    } catch (e) {
+      setToast(t("lan.operationFailed", { error: String(e) }));
+    }
+  };
+
+  // 清空共享文件夹：先确认（弹窗展示文件数量与大小），确认后再执行并刷新统计。
+  const onClearShareFiles = async () => {
+    const [count, size] = shareStats;
+    if (count === 0) {
+      setToast(t("lan.shareFilesEmpty"));
+      return;
+    }
+    const ok = window.confirm(
+      t("lan.clearShareConfirm", { count, size: formatBytes(size) }),
+    );
+    if (!ok) return;
+    try {
+      const removed = await api.lanClearShareFiles();
+      setToast(t("lan.clearShareDone", { count: removed }));
+      await refreshShareFiles();
+    } catch (e) {
+      setToast(t("lan.operationFailed", { error: String(e) }));
     }
   };
 
@@ -309,6 +363,25 @@ export function LanSettings() {
           </button>
           <button disabled={testing} onClick={() => void onTest()}>
             {testing ? t("lan.testing") : t("lan.testSend")}
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-card-title lan-subtitle">{t("lan.shareFiles")}</div>
+        <p className="settings-hint">
+          {t("lan.shareFilesStat", { count: shareStats[0], size: formatBytes(shareStats[1]) })}
+        </p>
+        <div className="settings-row settings-row-column">
+          <span>{t("lan.shareFilesLocation")}</span>
+          <p className="share-folder-path">{shareFolderPath || "-"}</p>
+        </div>
+        <div className="settings-row settings-row-actions">
+          <button className="btn-secondary" disabled={busy} onClick={() => void onOpenShareFolder()}>
+            {t("lan.openShareFolder")}
+          </button>
+          <button className="btn-danger" disabled={busy} onClick={() => void onClearShareFiles()}>
+            {t("lan.clearShareFiles")}
           </button>
         </div>
       </div>
