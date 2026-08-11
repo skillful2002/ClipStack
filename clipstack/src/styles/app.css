@@ -1174,7 +1174,8 @@
  * 图标绝对定位于输入框内部最右侧，不占用额外布局宽度。 */
 .settings-row .input-with-action {
   position: relative;
-  flex: 1 1 220px;
+  flex: 0 0 220px;
+  width: 220px;
   min-width: 0;
 }
 .settings-row .input-with-action input[type="text"],
