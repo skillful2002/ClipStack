@@ -726,6 +726,14 @@ pub struct LanConfigView {
     pub local_ip: String,
 }
 
+/// 按需返回当前明文共享密钥（仅当用户点击「显示」图标时调用，
+/// 不随 lan_get_config 自动返回，避免配置加载即泄露密钥）。
+#[tauri::command]
+pub async fn lan_get_key(state: State<'_, LanManager>) -> Result<String, String> {
+    let cfg = state.config().await;
+    Ok(cfg.share_key)
+}
+
 // ===== 局域网共享 · 配置管理（L3）=====
 
 /// 局域网共享配置视图（不泄露明文密钥）。

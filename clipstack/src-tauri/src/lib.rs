@@ -420,6 +420,7 @@ pub fn run() {
             commands::lan_send_test,
             commands::lan_get_peers,
             commands::lan_get_config,
+            commands::lan_get_key,
             commands::lan_list_profiles,
             commands::lan_upsert_profile,
             commands::lan_set_active_profile,

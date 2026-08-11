@@ -160,7 +160,19 @@ export function LanSettings() {
               className="input-reveal"
               title={t("lan.toggleKey")}
               aria-label={t("lan.toggleKey")}
-              onClick={() => setShowKey((v) => !v)}
+              onClick={async () => {
+                const next = !showKey;
+                // 已设置过密钥但输入框为空（留空=保持现有密钥）时，
+                // 点击显示则从后端取回明文密钥，便于核对旧密码。
+                if (next && key === "" && hasKey) {
+                  try {
+                    setKey(await api.lanGetKey());
+                  } catch {
+                    /* 取回失败则保持隐藏 */
+                  }
+                }
+                setShowKey(next);
+              }}
             >
               {showKey ? (
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

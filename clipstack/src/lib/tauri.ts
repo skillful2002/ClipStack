@@ -210,6 +210,10 @@ export interface PeerInfo {
 export const lanGetConfig = (): Promise<LanConfigView> =>
   invoke<LanConfigView>("lan_get_config");
 
+/** 按需获取当前明文共享密钥（仅用于前端点击「显示」图标核对旧密钥）。 */
+export const lanGetKey = (): Promise<string> =>
+  invoke<string>("lan_get_key");
+
 /** 设置局域网共享配置并重启发现（组/密钥变更会重新注册 mDNS 指纹）。 */
 export const lanSetConfig = (cfg: {
   group: string;

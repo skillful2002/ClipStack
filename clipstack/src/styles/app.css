@@ -1170,36 +1170,39 @@
   border-color: var(--cs-accent);
 }
 
-/* 文本 / 密码输入框 + 右侧操作按钮（如共享密钥的显示/隐藏图标）的组合容器。 */
+/* 文本 / 密码输入框 + 右侧操作图标（如共享密钥的显示/隐藏眼睛图标）。
+ * 图标绝对定位于输入框内部最右侧，不占用额外布局宽度。 */
 .settings-row .input-with-action {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
 }
 .settings-row .input-with-action input[type="text"],
 .settings-row .input-with-action input[type="password"] {
-  width: auto;
-  flex: 1 1 200px;
-  min-width: 0;
+  width: 100%;
+  padding-right: 38px;
 }
 .settings-row .input-reveal {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border: 1px solid var(--cs-border);
-  border-radius: var(--cs-radius-md);
-  background: var(--cs-bg);
-  color: var(--cs-text-secondary);
+  border: none;
+  background: transparent;
+  color: var(--cs-text-tertiary);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  border-radius: var(--cs-radius-sm);
+  transition: color 0.15s, background 0.15s;
 }
 .settings-row .input-reveal:hover {
   color: var(--cs-accent);
-  border-color: var(--cs-accent);
+  background: var(--cs-accent-soft);
 }
 
 /* 只读输入框（如本地 IP）：以虚线边框 + 等宽字体 + 弱化文字明确区分于可编辑输入框。 */
