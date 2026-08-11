@@ -807,7 +807,7 @@ pub async fn lan_set_config(
     } else {
         port
     };
-    state.set_config(cfg).await;
+    state.set_config(cfg).await?;
     Ok(())
 }
 
@@ -926,7 +926,7 @@ pub async fn lan_upsert_profile(
         cfg.share_group = group;
         cfg.share_key = plaintext;
         cfg.device_name = name;
-        state.set_config(cfg).await;
+        state.set_config(cfg).await?;
     }
     Ok(())
 }
@@ -947,7 +947,7 @@ pub async fn lan_set_active_profile(
     let mut cfg = state.config().await;
     cfg.share_group = group;
     cfg.share_key = plaintext;
-    state.set_config(cfg).await;
+    state.set_config(cfg).await?;
     Ok(())
 }
 
@@ -970,7 +970,7 @@ pub async fn lan_delete_profile(
         cfg.share_group = String::new();
         cfg.share_key = String::new();
         cfg.share_out = false;
-        state.set_config(cfg).await;
+        state.set_config(cfg).await?;
     }
     Ok(())
 }
@@ -978,7 +978,7 @@ pub async fn lan_delete_profile(
 /// 切换发布开关（share_out）。
 #[tauri::command]
 pub async fn lan_set_share_out(state: State<'_, LanManager>, enabled: bool) -> Result<(), String> {
-    state.set_share_out(enabled).await;
+    state.set_share_out(enabled).await?;
     Ok(())
 }
 

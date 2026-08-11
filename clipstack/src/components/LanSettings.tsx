@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import * as api from "../lib/tauri";
 import { useT } from "../lib/i18n";
 import { useHistory } from "../store/history";
+import { parseLanPrereqError, lanPrereqToastMessage } from "../lib/tauri";
 
 /** 可共享的内容类型白名单，顺序即界面展示顺序。 */
 const SHARE_TYPES = ["text", "image", "file"] as const;
@@ -111,7 +112,7 @@ export function LanSettings() {
       shareTypes?: string[];
     },
     silent = false,
-  ) => {
+  ): Promise<boolean> => {
     setBusy(true);
     try {
       const peersList = manualPeers
@@ -132,17 +133,27 @@ export function LanSettings() {
       setPortError("");
       if (!silent) setToast(t("lan.saved"));
       await refreshPeers();
+      return true;
     } catch (e) {
-      setToast(t("lan.saveFailed", { error: String(e) }));
+      // 开启共享时前置条件（组 / 密钥 / 端口）缺失：给出明确本地化提示。
+      const codes = parseLanPrereqError(e);
+      if (codes) {
+        setToast(lanPrereqToastMessage(codes, t));
+      } else {
+        setToast(t("lan.saveFailed", { error: String(e) }));
+      }
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
   // 「是否共享」开关：切换即立即生效（提交全部配置并启停共享）。
-  const onShareOutChange = (next: boolean) => {
+  // 若后端因前置条件（组 / 密钥 / 端口）不满足而拒绝，回退开关状态。
+  const onShareOutChange = async (next: boolean) => {
     setShareOut(next);
-    void applyConfig({ shareOut: next });
+    const ok = await applyConfig({ shareOut: next });
+    if (!ok) setShareOut(!next);
   };
 
   const onTest = async () => {

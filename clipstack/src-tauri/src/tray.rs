@@ -316,9 +316,17 @@ fn handle_menu_event(
             // 托盘「共享」开关：读取当前状态并取反，切换 share_out（会热重启发现）。
             if let Some(mgr) = app.try_state::<LanManager>() {
                 let on = mgr.is_share_out();
-                tauri::async_runtime::block_on(mgr.set_share_out(!on));
+                match tauri::async_runtime::block_on(mgr.set_share_out(!on)) {
+                    Ok(()) => {
+                        // 切换成功（含前置条件校验通过），刷新菜单圆点 / 状态文字。
+                        let _ = app.emit("refresh-tray", ());
+                    }
+                    Err(e) => {
+                        // 前置条件不满足（组 / 密钥 / 端口未配置）：转发给前端弹出提示。
+                        let _ = app.emit("lan-config-error", e);
+                    }
+                }
             }
-            let _ = app.emit("refresh-tray", ());
         }
         "tray_lock" => {
             // 托盘「锁定」菜单：立即锁定应用。

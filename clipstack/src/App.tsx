@@ -14,6 +14,9 @@ import {
   isLocked,
   getSystemInfo,
   onAppLockChanged,
+  onLanConfigError,
+  parseLanPrereqError,
+  lanPrereqToastMessage,
   touchActivity,
 } from "./lib/tauri";
 import { useItemActions } from "./lib/actions";
@@ -260,6 +263,24 @@ export default function App() {
     const t = setTimeout(() => setToast(null), 2600);
     return () => clearTimeout(t);
   }, [toast, setToast]);
+
+  // 全局监听后端错误提示（如托盘开启共享时前置条件不满足），弹出本地化 toast。
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void onLanConfigError((msg) => {
+      const st = useHistory.getState();
+      const lang = getResolvedLang();
+      const codes = parseLanPrereqError(msg);
+      if (codes) {
+        st.setToast(lanPrereqToastMessage(codes, (k, p) => translate(lang, k, p)));
+      } else {
+        st.setToast(translate(lang, "lan.operationFailed", { error: msg }));
+      }
+    }).then((fn) => (un = fn));
+    return () => {
+      un?.();
+    };
+  }, []);
 
   return (
     <div className="app">

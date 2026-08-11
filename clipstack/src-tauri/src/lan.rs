@@ -413,7 +413,14 @@ impl LanManager {
     /// 密钥，**不拆除任何连接、不清空对端名称缓存**。否则每次改动（尤其是文件上限输入框
     /// 的逐字符输入）都会 `stop()` + `start()`，导致：① 正在传输的文件因连接被 tearing
     /// down 而丢失；② `peer_names` 被清空，随后收到的剪贴板来源回退为设备 ID。
-    pub async fn set_config(&self, cfg: LanConfig) {
+    pub async fn set_config(&self, cfg: LanConfig) -> Result<(), String> {
+        // 若要开启共享，必须先配置组 / 密钥 / 端口；缺失则返回错误，且不改动任何状态。
+        if cfg.share_out {
+            let missing = Self::missing_share_prereqs(&cfg);
+            if !missing.is_empty() {
+                return Err(format!("SHARE_PREREQ_MISSING:{}", missing.join(",")));
+            }
+        }
         let need_restart = {
             let inner = self.inner.lock().await;
             let old = &inner.config;
@@ -437,6 +444,7 @@ impl LanManager {
             self.stop().await;
             self.start().await;
         }
+        Ok(())
     }
 
     /// 停止发现与所有连接。
@@ -552,7 +560,35 @@ impl LanManager {
         self.share_out_flag.load(Ordering::SeqCst)
     }
 
-    pub async fn set_share_out(&self, enabled: bool) {
+    /// 校验「开启共享」的前置条件：共享组、共享密钥、监听端口三者都必须已设置。
+    /// 返回缺失参数的内码（`["group","key","port"]` 的子集，空表示通过）。
+    /// 端口为 `u16`，默认即 `LAN_PORT`（非零），故通常已满足；仅当用户显式清空为 0 时不通过。
+    fn missing_share_prereqs(cfg: &LanConfig) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if cfg.share_group.trim().is_empty() {
+            missing.push("group");
+        }
+        if cfg.share_key.trim().is_empty() {
+            missing.push("key");
+        }
+        if cfg.listen_port == 0 {
+            missing.push("port");
+        }
+        missing
+    }
+
+    pub async fn set_share_out(&self, enabled: bool) -> Result<(), String> {
+        // 开启共享前校验前置条件：组 / 密钥 / 端口三者缺一不可，否则返回错误提示，
+        // 且不改变任何状态（托盘 / 前端据此提示用户先完成配置）。
+        if enabled {
+            let missing = {
+                let inner = self.inner.lock().await;
+                Self::missing_share_prereqs(&inner.config)
+            };
+            if !missing.is_empty() {
+                return Err(format!("SHARE_PREREQ_MISSING:{}", missing.join(",")));
+            }
+        }
         let changed = {
             let mut inner = self.inner.lock().await;
             if inner.config.share_out == enabled {
@@ -574,6 +610,7 @@ impl LanManager {
             // 通知前端立即同步开关状态（主要服务「托盘切换共享」场景）。
             let _ = self.app.emit("lan-config-changed", ());
         }
+        Ok(())
     }
 
     pub async fn config(&self) -> LanConfig {

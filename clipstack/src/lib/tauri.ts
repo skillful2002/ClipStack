@@ -314,3 +314,41 @@ export const onLanPortInUse = (
  *  前端据此重新拉取配置，保持「共享」开关与在线状态与后端一致。 */
 export const onLanConfigChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen("lan-config-changed", () => cb());
+
+/** 后端错误提示事件（如托盘开启共享时前置条件不满足）。
+ *  载荷为后端返回的原始错误信息字符串。 */
+export const onLanConfigError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
+  listen<string>("lan-config-error", (event) => cb(event.payload));
+
+/// 后端在「开启共享」前置条件不满足时返回的错误标记前缀。
+export const LAN_PREREQ_ERR = "SHARE_PREREQ_MISSING:";
+
+/** 解析后端「开启共享前置条件缺失」错误，提取缺失参数内码（group/key/port）。
+ *  非此类错误返回 null。 */
+export function parseLanPrereqError(e: unknown): string[] | null {
+  const msg =
+    e instanceof Error
+      ? e.message
+      : typeof e === "string"
+        ? e
+        : String(e);
+  if (msg.startsWith(LAN_PREREQ_ERR)) {
+    return msg.slice(LAN_PREREQ_ERR.length).split(",").filter(Boolean);
+  }
+  return null;
+}
+
+/** 将缺失参数内码转换为本地化的 toast 文案。
+ *  `t` 为翻译函数（如组件内的 `t` 或 App 中的 `translate`）。 */
+export function lanPrereqToastMessage(
+  codes: string[],
+  t: (k: string, p?: Record<string, string | number>) => string,
+): string {
+  const labels = codes.map((c) => {
+    if (c === "group") return t("lan.fieldGroup");
+    if (c === "key") return t("lan.fieldKey");
+    if (c === "port") return t("lan.fieldPort");
+    return c;
+  });
+  return t("lan.sharePrereqMissing", { items: labels.join("、") });
+}
