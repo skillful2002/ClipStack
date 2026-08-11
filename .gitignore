@@ -21,3 +21,4 @@ target/*
 
 # 注：node_modules / dist（前端）与 src-tauri/target / src-tauri/gen（Rust）
 #     已由 clipstack/.gitignore 与 clipstack/src-tauri/.gitignore 分别忽略。
+clipstack/src-tauri/target-win

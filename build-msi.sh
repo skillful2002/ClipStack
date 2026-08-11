@@ -19,6 +19,11 @@ export PATH="$PATH:$VS_M/bin/Hostx64/x64:$SDK_M/bin/$SDKVER/x64:/c/Users/Adminis
 export NODE_OPTIONS=""
 export CODEBUDDY_SAFE_DELETE_SANDBOX=0
 
+# 避免旧 target/release 下被残留句柄锁定的 .cargo-build-lock / .fingerprint：
+# 构建到一个全新的 target 目录，由 cargo 创建全新的锁文件，绕开锁定。
+# 关键：放在工作区之外（D:/work/ClipStack 被文件监视器持有句柄，会导致 .cargo-build-lock 创建失败 os error 5）。
+export CARGO_TARGET_DIR="D:/cs-build"
+
 cd /d/work/ClipStack/clipstack
 
 echo "==== env check ===="
