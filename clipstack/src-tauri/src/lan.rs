@@ -201,7 +201,7 @@ pub struct PortInUsePayload {
 /// 一条已建立的对端连接句柄：持有写端 mpsc，用于向该对端推送信封。
 struct ConnHandle {
     device_id: String,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::UnboundedSender<Message>,
 }
 
 /// manager 内部可变状态。
@@ -215,6 +215,8 @@ struct Inner {
     client_stops: HashMap<String, Arc<AtomicBool>>,
     /// 已知的组内对端（device_id -> 最近地址），用于断线重连判定。
     known_peers: HashMap<String, SocketAddr>,
+    /// 已知对端名称（device_id -> 友好名），来源 mDNS TXT 或握手 hello，用于共享列表展示。
+    peer_names: HashMap<String, String>,
     mdns: Option<ServiceDaemon>,
     /// 数据库句柄（写入对端共享条目）。
     db: DbState,
@@ -243,6 +245,7 @@ impl LanManager {
                 conns: HashMap::new(),
                 client_stops: HashMap::new(),
                 known_peers: HashMap::new(),
+                peer_names: HashMap::new(),
                 mdns: None,
                 db,
                 server_task: None,
@@ -269,8 +272,13 @@ impl LanManager {
         };
 
         // 1) 注册本机服务实例。
+        // 注意：`ServiceInfo::new` 的实例名参数只需「纯实例标签」（如 "my-pc"），
+        // 库内部会自行拼接为 `实例名.服务类型`（见 mdns-sd service_info.rs: fullname = "{name}.{ty_domain}"）。
+        // 切勿把完整服务名（含 "_clipstack._tcp.local." 后缀）当作实例名传入，
+        // 否则会生成 "my-pc._clipstack._tcp.local.._clipstack._tcp.local." 这样的畸形全名，
+        // 永远匹配不上 `browse("_clipstack._tcp.local.")`，导致两端互相发现失败。
         let fp = crypto::group_fingerprint(&inner.config.share_group, &inner.config.share_key);
-        let instance = format!("{}.{}", sanitize_name(&inner.config.device_name), SERVICE_TYPE);
+        let instance = lan_instance_name(&inner.config.device_name);
         let host = format!("{}.local.", sanitize_name(&inner.config.device_name));
         let local_ip = local_ipv4();
         let ip_arg: IpAddr = local_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
@@ -396,6 +404,7 @@ impl LanManager {
             inner.client_stops.clear();
             inner.conns.clear();
             inner.known_peers.clear();
+            inner.peer_names.clear();
             // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
             inner.server_task.take()
         };
@@ -424,14 +433,14 @@ impl LanManager {
         };
         let mut count = 0;
         // 复制发送端，避免持有锁期间 await。
-        let handles: Vec<(String, mpsc::UnboundedSender<Vec<u8>>)> = inner
+        let handles: Vec<(String, mpsc::UnboundedSender<Message>)> = inner
             .conns
             .iter()
             .map(|(id, h)| (id.clone(), h.tx.clone()))
             .collect();
         drop(inner);
         for (_, tx) in handles {
-            if tx.send(bytes.clone()).is_ok() {
+            if tx.send(Message::Binary(bytes.clone().into())).is_ok() {
                 count += 1;
             }
         }
@@ -446,7 +455,11 @@ impl LanManager {
             .values()
             .map(|h| PeerInfo {
                 device_id: h.device_id.clone(),
-                name: h.device_id.clone(), // L3 用已知名填充
+                name: inner
+                    .peer_names
+                    .get(&h.device_id)
+                    .cloned()
+                    .unwrap_or_else(|| h.device_id.clone()),
                 addr: String::new(),
                 connected: true,
             })
@@ -507,12 +520,15 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
                 None => return,
             };
             let fp = info.get_property_val_str("group_fp").unwrap_or("").to_string();
+            let name = info.get_property_val_str("name").unwrap_or("").to_string();
             // 分组指纹不一致 -> 跳过（不同组 / 不同密钥）。
             {
-                let g = inner.lock().await;
+                let mut g = inner.lock().await;
                 if fp != crypto::group_fingerprint(&g.config.share_group, &g.config.share_key) {
                     return;
                 }
+                // 记录对端友好名（供共享列表展示），优先于握手 hello。
+                g.peer_names.insert(device_id.clone(), name.clone());
             }
             // 取对端地址（优先非回环；无则取首个）。
             let addr = {
@@ -556,6 +572,7 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
                     stop.store(true, Ordering::SeqCst);
                 }
                 g.known_peers.remove(&id);
+                g.peer_names.remove(&id);
                 g.conns.remove(&id);
                 let _ = app.emit("lan-peer-offline", PeerInfo {
                     device_id: id,
@@ -630,11 +647,11 @@ where
 {
     let (mut write, mut read) = ws.split();
 
-    // 建一个 mpsc，写任务从它取信封字节发往对端。
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // 建一个 mpsc，写任务从它取消息（信封二进制 / 握手文本）发往对端。
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let write_task = tauri::async_runtime::spawn(async move {
-        while let Some(bytes) = rx.recv().await {
-            if write.send(Message::Binary(bytes.into())).await.is_err() {
+        while let Some(msg) = rx.recv().await {
+            if write.send(msg).await.is_err() {
                 break;
             }
         }
@@ -644,6 +661,25 @@ where
     let inner_r = inner.clone();
     let app_r = app.clone();
     let tx_r = tx.clone();
+
+    // 连接建立即处理「在线」：
+    // - 客户端侧已知对端 device_id（来自 mDNS），立即登记，无需等首条剪贴板信封；
+    // - 双方各发一条 hello 握手（携带本端 device_id + 名称），使服务端侧也能立即获知对端并登记。
+    // 这样「共享列表」在连接建立后即可显示对端，而非要等某次复制同步。
+    let (my_id, my_name) = {
+        let g = inner.lock().await;
+        (g.config.device_id.clone(), g.config.device_name.clone())
+    };
+    if let Some(id) = &peer_id {
+        register_conn(&inner, &app, id, tx_r.clone()).await;
+    }
+    let hello = serde_json::json!({
+        "type": "hello",
+        "device_id": my_id,
+        "name": my_name,
+    })
+    .to_string();
+    let _ = tx.send(Message::Text(hello.into()));
     let read_task = tauri::async_runtime::spawn(async move {
         let mut learned_id: Option<String> = peer_id.clone();
         while let Some(msg) = read.next().await {
@@ -652,6 +688,27 @@ where
                 Err(_) => break,
             };
             match msg {
+                Message::Text(s) => {
+                    // 握手：对端告知其 device_id + 名称，使本端（服务端侧）立即登记「在线」，
+                    // 而无需等待首条剪贴板信封。客户端侧 learned_id 已由 mDNS 预置，此处仅更新名称。
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("hello") {
+                            if let Some(rid) = v.get("device_id").and_then(|d| d.as_str()) {
+                                let nm = v
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if learned_id.is_none() {
+                                    learned_id = Some(rid.to_string());
+                                    register_conn(&inner_r, &app_r, rid, tx_r.clone()).await;
+                                } else {
+                                    update_peer_name(&inner_r, &app_r, rid, &nm).await;
+                                }
+                            }
+                        }
+                    }
+                }
                 Message::Binary(bytes) => {
                     let env = match SyncEnvelope::from_bytes(&bytes) {
                         Ok(e) => e,
@@ -759,19 +816,22 @@ where
 }
 
 /// 把连接句柄登记进 manager，并广播在线事件。
+/// 仅在对端「新上线」时广播 `lan-peer-online`，避免握手 hello 与首条信封重复触发。
+/// 名称优先取 `peer_names`（mDNS TXT / hello 提供），缺失时回退 device_id。
 async fn register_conn(
     inner: &Arc<Mutex<Inner>>,
     app: &AppHandle,
     device_id: &str,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::UnboundedSender<Message>,
 ) {
-    let name = {
+    let (is_new, resolved) = {
         let mut g = inner.lock().await;
-        let name = g
-            .known_peers
+        let resolved = g
+            .peer_names
             .get(device_id)
-            .map(|_| device_id.to_string())
+            .cloned()
             .unwrap_or_else(|| device_id.to_string());
+        let is_new = !g.conns.contains_key(device_id);
         g.conns.insert(
             device_id.to_string(),
             ConnHandle {
@@ -779,17 +839,52 @@ async fn register_conn(
                 tx,
             },
         );
-        name
+        if !g.peer_names.contains_key(device_id) {
+            g.peer_names.insert(device_id.to_string(), resolved.clone());
+        }
+        (is_new, resolved)
     };
-    let _ = app.emit(
-        "lan-peer-online",
-        PeerInfo {
-            device_id: device_id.to_string(),
-            name,
-            addr: String::new(),
-            connected: true,
-        },
-    );
+    if is_new {
+        let _ = app.emit(
+            "lan-peer-online",
+            PeerInfo {
+                device_id: device_id.to_string(),
+                name: resolved,
+                addr: String::new(),
+                connected: true,
+            },
+        );
+    }
+}
+
+/// 更新已知对端名称（来自握手 hello / mDNS 刷新）；名称变化才重新广播在线事件。
+async fn update_peer_name(
+    inner: &Arc<Mutex<Inner>>,
+    app: &AppHandle,
+    device_id: &str,
+    name: &str,
+) {
+    let changed = {
+        let mut g = inner.lock().await;
+        match g.peer_names.get(device_id) {
+            Some(existing) if existing == name => false,
+            _ => {
+                g.peer_names.insert(device_id.to_string(), name.to_string());
+                true
+            }
+        }
+    };
+    if changed {
+        let _ = app.emit(
+            "lan-peer-online",
+            PeerInfo {
+                device_id: device_id.to_string(),
+                name: name.to_string(),
+                addr: String::new(),
+                connected: true,
+            },
+        );
+    }
 }
 
 /// 移除连接并广播离线事件。
@@ -844,6 +939,14 @@ pub(crate) fn local_ipv4() -> Option<IpAddr> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
     sock.local_addr().ok().map(|a| a.ip())
+}
+
+/// mDNS 实例标签：仅「纯实例名」，绝不可附带服务类型后缀。
+/// `mdns-sd` 的 `ServiceInfo::new` 会自动拼接为 `实例名.服务类型`
+/// （见 service_info.rs: `fullname = "{name}.{ty_domain}"`），
+/// 若这里再带上 `_clipstack._tcp.local.` 会生成畸形全名，使 `browse` 永远匹配不上。
+fn lan_instance_name(name: &str) -> String {
+    sanitize_name(name)
 }
 
 /// 设备名清洗为合法 mDNS 主机标签。
@@ -918,6 +1021,17 @@ mod tests {
     fn default_listen_port_is_lan_port() {
         // 默认监听端口应等于常量，供冲突时在设置中修改。
         assert_eq!(LanConfig::default().listen_port, LAN_PORT);
+    }
+
+    #[test]
+    fn lan_instance_name_has_no_service_type_suffix() {
+        // 回归：mDNS 实例标签绝不能包含服务类型后缀，否则 mdns-sd 会拼出
+        // `name._clipstack._tcp.local.._clipstack._tcp.local.` 这样的畸形全名，
+        // 导致 browse("_clipstack._tcp.local.") 永远匹配不上、两端互相发现失败。
+        let label = lan_instance_name("MyMacBook");
+        assert_eq!(label, "MyMacBook");
+        assert!(!label.contains("_clipstack"));
+        assert!(!label.contains('.'));
     }
 
     #[test]
