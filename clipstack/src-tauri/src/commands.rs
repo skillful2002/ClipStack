@@ -874,7 +874,7 @@ pub async fn lan_share_stats(app: AppHandle) -> Result<(u64, u64), String> {
                     count += 1;
                     size += meta.len();
                 } else if meta.is_dir() {
-                    // 按 sync_id 分桶的子目录，递归累加其中文件。
+                    // 月份子目录，递归累加其中的文件。
                     if let Ok(mut sub) = std::fs::read_dir(&p) {
                         while let Some(Ok(child)) = sub.next() {
                             let cp = child.path();

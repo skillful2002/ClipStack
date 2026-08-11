@@ -802,14 +802,15 @@ where
                                         r.item.payload.len() as i64,
                                     )
                                 } else {
-                                    // 文件：解 bundle 并物理落盘到 `~/.clipstack/share/<sync_id>/`，
+                                    // 文件：解 bundle 并物理落盘到 `~/.clipstack/share/<YYYY-MM>/`，
                                     // content_text / content_blob 改存本机本地路径，使对端可真正复制使用。
                                     // 旧端兼容：bundle 解析失败（对端为旧版，payload 为 JSON 路径）则按原样存储（本机不可用，仅展示）。
                                     match decode_file_bundle(&r.item.payload) {
                                         Some(entries) => {
                                             let (joined, blob, size) = match app_r.path().home_dir() {
                                                 Ok(home) => {
-                                                    let dir = share_dir(&home, &r.item.sync_id);
+                                                    // 按当前月份分目录落盘，文件名加 sync_id 前缀防同名覆盖。
+                                                    let dir = share_month_dir(&home);
                                                     let _ = std::fs::create_dir_all(&dir);
                                                     let mut local_paths: Vec<String> = Vec::new();
                                                     let mut total: u64 = 0;
@@ -822,7 +823,7 @@ where
                                                         if fname.is_empty() {
                                                             continue;
                                                         }
-                                                        let dest = dir.join(&fname);
+                                                        let dest = dir.join(format!("{}_{}", r.item.sync_id, fname));
                                                         if std::fs::write(&dest, &data).is_ok() {
                                                             total += data.len() as u64;
                                                             local_paths
@@ -1162,16 +1163,58 @@ fn png_dimensions_label(blob: &[u8]) -> Option<String> {
     Some(format!("{width}×{height} 图片"))
 }
 
-/// 局域网共享「文件」的物理落盘目录：`~/.clipstack/share/<sync_id>/`。
-/// 按对端 `sync_id` 分子目录，避免不同共享项同名文件互相覆盖。
-fn share_dir(home: &std::path::Path, sync_id: &str) -> std::path::PathBuf {
-    home.join(".clipstack").join("share").join(sync_id)
+/// 局域网共享「文件」的物理落盘目录：`~/.clipstack/share/<YYYY-MM>/`。
+/// 按当前 UTC 月份分目录，便于按时间归类与清理；文件名以 `sync_id_` 为前缀，
+/// 避免不同共享项（不同 sync_id）的同名文件互相覆盖。
+fn share_month_dir(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".clipstack").join("share").join(current_utc_month())
 }
 
-/// 局域网共享文件根目录：`~/.clipstack/share/`（所有 sync_id 子目录的父目录）。
+/// 局域网共享文件根目录：`~/.clipstack/share/`（所有月份子目录的父目录）。
 /// 供命令层统计/打开/清空共享文件夹时使用。
 pub fn share_root(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".clipstack").join("share")
+}
+
+/// 当前 UTC 年-月（如 "2026-08"），用于共享文件按月分目录。
+/// 不引入额外依赖，基于 UNIX 时间戳逐年份 / 月份折算。
+fn current_utc_month() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut days = (secs / 86400) as i64;
+    let mut year = 1970i64;
+    loop {
+        let ydays = if is_leap_year(year) { 366 } else { 365 };
+        if days >= ydays {
+            days -= ydays;
+            year += 1;
+        } else {
+            break;
+        }
+    }
+    let month_days: [i64; 12] = [
+        31,
+        if is_leap_year(year) { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month = 1;
+    let mut d = days;
+    while month <= 12 {
+        if d >= month_days[month - 1] {
+            d -= month_days[month - 1];
+            month += 1;
+        } else {
+            break;
+        }
+    }
+    format!("{year:04}-{month:02}")
+}
+
+/// 闰年判定（公历）。
+fn is_leap_year(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
 /// 将一组「文件名 + 字节」编码为自描述的二进制 bundle（用于跨端传输文件内容）。
