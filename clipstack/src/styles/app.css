@@ -1389,6 +1389,13 @@
   white-space: nowrap;
 }
 
+/* 机器名称下方的本机设备 ID 提示（等宽字体，可选取）。 */
+.lan-device-id-hint {
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  user-select: text;
+  word-break: break-all;
+}
+
 /* 共享类型：文本 / 图片 / 文件 横向排列的勾选项。 */
 .lan-share-types {
   display: flex;

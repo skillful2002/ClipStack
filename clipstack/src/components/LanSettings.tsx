@@ -221,6 +221,7 @@ export function LanSettings() {
             onChange={(e) => setName(e.target.value)}
           />
         </div>
+        <p className="settings-hint lan-device-id-hint">{deviceId}</p>
 
         <div className="settings-row">
           <span>{t("lan.localIp")}</span>
