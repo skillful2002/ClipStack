@@ -63,7 +63,7 @@ impl Default for LanConfig {
             share_group: String::new(),
             share_key: String::new(),
             share_out: false,
-            file_limit_mb: 100,
+            file_limit_mb: 10,
             manual_peers: Vec::new(),
             share_types: vec!["text".into(), "image".into(), "file".into()],
             listen_port: LAN_PORT,
@@ -162,7 +162,7 @@ fn load_persisted_config(db: &DbState, cfg: &mut LanConfig) {
         cfg.device_name = name;
     }
     cfg.share_out = db::get_string_setting(&conn, "lan_share_out", "0") == "1";
-    let fl = db::get_int_setting(&conn, "lan_file_limit_mb", 100);
+    let fl = db::get_int_setting(&conn, "lan_file_limit_mb", 10);
     if fl > 0 {
         cfg.file_limit_mb = fl as u64;
     }

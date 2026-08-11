@@ -20,7 +20,7 @@ export function LanSettings() {
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [shareOut, setShareOut] = useState(false);
-  const [fileLimitMb, setFileLimitMb] = useState(100);
+  const [fileLimitMb, setFileLimitMb] = useState(10);
   const [manualPeers, setManualPeers] = useState("");
   const [shareTypes, setShareTypes] = useState<string[]>([...SHARE_TYPES]);
   const [hasKey, setHasKey] = useState(false);
@@ -108,7 +108,7 @@ export function LanSettings() {
         key: key, // 留空 = 保持现有密钥
         name: name.trim(),
         shareOut,
-        fileLimitMb: Math.max(1, Math.min(1024, fileLimitMb || 100)),
+        fileLimitMb: Math.max(1, Math.min(1024, fileLimitMb || 10)),
         shareTypes,
         manualPeers: peersList,
         port: listenPort || 0, // 0 由后端回退为默认 LAN_PORT
