@@ -40,6 +40,7 @@ mod tests {
         SyncEnvelope {
             sync_id: id.into(),
             device_id: "devA".into(),
+            source_app: String::new(),
             lamport: 1,
             kind: ClipKind::Text,
             hash: hash.into(),

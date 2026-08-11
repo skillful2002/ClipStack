@@ -116,8 +116,9 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
                             let mgr = lan.inner().clone();
                             let ct = item.content_type.as_str().to_string();
                             let txt = item.content_text.clone();
+                            let src = item.source_app.clone();
                             tauri::async_runtime::spawn(async move {
-                                mgr.broadcast_local(&ct, &txt).await;
+                                mgr.broadcast_local(&ct, &txt, &src).await;
                             });
                         }
                         println!(

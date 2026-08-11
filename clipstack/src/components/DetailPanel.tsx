@@ -95,7 +95,11 @@ export function DetailPanel() {
           <TypeIcon type={item.contentType} size={16} />
           {t(`type.${item.contentType}`)}
         </span>
-        <span className="detail-app">{item.sourceApp || t("item.unknownSource")}</span>
+        <span className="detail-app">
+          {item.isRemote
+            ? (item.originDevice || t("item.local"))
+            : (item.sourceApp || t("item.unknownSource"))}
+        </span>
       </div>
 
       <div className="detail-preview">
@@ -133,7 +137,11 @@ export function DetailPanel() {
       <div className="detail-meta">
         <div className="meta-row">
           <span className="meta-key">{t("detail.metaSource")}</span>
-          <span className="meta-val">{item.sourceApp || t("detail.dash")}</span>
+          <span className="meta-val">
+            {item.isRemote
+              ? `${item.originDevice || t("item.local")}${item.sourceApp ? ` · ${item.sourceApp}` : ""}`
+              : (item.sourceApp || t("detail.dash"))}
+          </span>
         </div>
         <div className="meta-row">
           <span className="meta-key">{t("detail.metaSize")}</span>

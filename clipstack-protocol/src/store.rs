@@ -86,6 +86,7 @@ impl ClipStore {
         let item = ClipboardItem {
             sync_id: env.sync_id.clone(),
             device_id: env.device_id.clone(),
+            source_app: env.source_app.clone(),
             lamport: env.lamport,
             kind: env.kind,
             hash: env.hash.clone(),
@@ -140,6 +141,7 @@ mod tests {
         SyncEnvelope {
             sync_id: id.into(),
             device_id: dev.into(),
+            source_app: String::new(),
             lamport,
             kind: ClipKind::Text,
             hash: ClipboardItem::content_hash(payload),

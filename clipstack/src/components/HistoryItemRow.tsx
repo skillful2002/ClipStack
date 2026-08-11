@@ -45,6 +45,7 @@ export function HistoryItemRow({
               title={t("lan.receivedFrom", { name: item.originDevice ?? "" })}
             >
               {t("lan.title")} · {item.originDevice || t("item.local")}
+              {item.sourceApp ? ` · ${item.sourceApp}` : ""}
             </span>
           ) : (
             <span className="item-app">{item.sourceApp || t("item.unknownSource")}</span>

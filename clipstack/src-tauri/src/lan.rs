@@ -485,7 +485,12 @@ impl LanManager {
     /// L3 · 本地捕获后广播（由监控线程调用）。仅当 `share_out` 开启时广播；
     /// 未配置共享（组/密钥空）时 `share_out` 恒为关闭，故不会误广播。
     /// 返回推送到的对端数。
-    pub async fn broadcast_local(&self, content_type: &str, content_text: &str) -> usize {
+    pub async fn broadcast_local(
+        &self,
+        content_type: &str,
+        content_text: &str,
+        source_app: &str,
+    ) -> usize {
         let share_out = self.inner.lock().await.config.share_out;
         if !share_out {
             return 0;
@@ -500,6 +505,7 @@ impl LanManager {
         let item = ClipboardItem {
             sync_id: Uuid::new_v4().to_string(),
             device_id: String::new(), // 由 broadcast_clip 时覆盖为本地 device_id
+            source_app: source_app.to_string(),
             lamport: 0,
             kind,
             hash: ClipboardItem::content_hash(content_text.as_bytes()),
@@ -737,7 +743,16 @@ where
                             let ct_str = kind_name(r.item.kind);
                             let text = String::from_utf8_lossy(&r.item.payload).to_string();
                             let sync_id = r.item.sync_id.clone();
-                            let origin = r.item.device_id.clone();
+                            let src_app = r.item.source_app.clone();
+                            // 对端友好设备名：mDNS ServiceResolved 时按 device_id 存入 peer_names。
+                            let dev_name = {
+                                let g = inner_r.lock().await;
+                                g.peer_names
+                                    .get(&r.item.device_id)
+                                    .cloned()
+                                    .filter(|n| !n.is_empty())
+                                    .unwrap_or_else(|| r.item.device_id.clone())
+                            };
                             let lamport = r.item.lamport as i64;
                             let hash = r.item.hash.clone();
                             // 先落库，再在释放 db 锁之后才 emit 事件。
@@ -756,11 +771,11 @@ where
                                         content_type: &ct_str,
                                         content_text: &text,
                                         content_blob: None,
-                                        source_app: &origin,
+                                        source_app: &src_app,
                                         size_bytes: text.len() as i64,
                                         hash: &hash,
                                         is_sensitive: false,
-                                        origin_device: &origin,
+                                        origin_device: &dev_name,
                                         sync_id: &sync_id,
                                         lamport,
                                         profile_id: "",
@@ -774,14 +789,14 @@ where
                                             content_type: content_type_from_str(&ct_str),
                                             content_text: text.clone(),
                                             preview: text.clone(),
-                                            source_app: origin.clone(),
+                                            source_app: src_app.clone(),
                                             size_bytes: text.len() as i64,
                                             hash: hash.clone(),
                                             is_pinned: false,
                                             is_favorite: false,
                                             is_sensitive: false,
                                             created_at: db::now_ms(),
-                                            origin_device: origin.clone(),
+                                            origin_device: dev_name.clone(),
                                             is_remote: true,
                                             deleted_at: None,
                                         });
@@ -798,7 +813,7 @@ where
                                 "lan-clipboard-received",
                                 ReceivedClipPayload {
                                     sync_id,
-                                    origin_device: origin,
+                                    origin_device: dev_name,
                                     kind: ct_str.to_string(),
                                 },
                             );
@@ -935,6 +950,7 @@ fn build_envelope(
     Some(SyncEnvelope {
         sync_id: item.sync_id,
         device_id: cfg.device_id.clone(),
+        source_app: item.source_app,
         lamport,
         kind: item.kind,
         hash,
@@ -1016,6 +1032,7 @@ pub fn text_item(text: &str) -> ClipboardItem {
     ClipboardItem {
         sync_id: Uuid::new_v4().to_string(),
         device_id: String::new(), // 由 broadcast 时覆盖为本地
+        source_app: String::new(),
         lamport: 0,
         kind: ClipKind::Text,
         hash,

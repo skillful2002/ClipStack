@@ -29,6 +29,10 @@ pub struct SyncEnvelope {
     pub sync_id: String,
     /// 来源设备。
     pub device_id: String,
+    /// 来源应用名（本机捕获时记录，随信封明文传输，非敏感）。
+    /// 接收端据此在历史列表 / 详情中展示「来自某应用」。
+    #[serde(default)]
+    pub source_app: String,
     /// 逻辑时钟，用于排序。
     pub lamport: u64,
     /// 条目类型。
@@ -46,6 +50,9 @@ pub struct SyncEnvelope {
 pub struct ClipboardItem {
     pub sync_id: String,
     pub device_id: String,
+    /// 来源应用名（本机捕获时记录；经 `SyncEnvelope.source_app` 随信封传输）。
+    #[serde(default)]
+    pub source_app: String,
     pub lamport: u64,
     pub kind: ClipKind,
     pub hash: String,
@@ -96,6 +103,7 @@ mod tests {
         let item = ClipboardItem {
             sync_id: "s1".into(),
             device_id: "devA".into(),
+            source_app: "TestApp".into(),
             lamport: 3,
             kind: ClipKind::Text,
             hash: "abc".into(),
@@ -104,6 +112,7 @@ mod tests {
         let env = SyncEnvelope {
             sync_id: item.sync_id.clone(),
             device_id: item.device_id.clone(),
+            source_app: "TestApp".into(),
             lamport: item.lamport,
             kind: item.kind,
             hash: item.hash.clone(),
