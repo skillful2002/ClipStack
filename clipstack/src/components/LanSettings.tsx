@@ -230,8 +230,8 @@ export function LanSettings() {
             type="text"
             placeholder={t("lan.groupPlaceholder")}
             value={group}
+            disabled={shareOut}
             onChange={(e) => setGroup(e.target.value)}
-            onBlur={() => void applyConfig()}
           />
         </div>
 
@@ -243,14 +243,15 @@ export function LanSettings() {
               autoComplete="new-password"
               placeholder={hasKey ? t("lan.keyPlaceholderKeep") : t("lan.keyPlaceholder")}
               value={key}
+              disabled={shareOut}
               onChange={(e) => setKey(e.target.value)}
-              onBlur={() => void applyConfig()}
             />
             <button
               type="button"
               className="input-reveal"
               title={t("lan.toggleKey")}
               aria-label={t("lan.toggleKey")}
+              disabled={shareOut}
               onClick={async () => {
                 const next = !showKey;
                 // 已设置过密钥但输入框为空（留空=保持现有密钥）时，
@@ -286,8 +287,8 @@ export function LanSettings() {
             type="text"
             placeholder={t("lan.namePlaceholder")}
             value={name}
+            disabled={shareOut}
             onChange={(e) => setName(e.target.value)}
-            onBlur={() => void applyConfig()}
           />
         </div>
         <p className="settings-hint lan-device-id-hint">{deviceId}</p>
@@ -309,11 +310,11 @@ export function LanSettings() {
             min={1}
             max={65535}
             value={listenPort}
+            disabled={shareOut}
             onChange={(e) => {
               setListenPort(Number(e.target.value));
               setPortError("");
             }}
-            onBlur={() => void applyConfig()}
           />
         </div>
         <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
@@ -372,8 +373,8 @@ export function LanSettings() {
             rows={3}
             placeholder={t("lan.manualPeersPlaceholder", { port })}
             value={manualPeers}
+            disabled={shareOut}
             onChange={(e) => setManualPeers(e.target.value)}
-            onBlur={() => void applyConfig()}
           />
           <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
         </div>
