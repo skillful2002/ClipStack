@@ -221,7 +221,7 @@ export function LanSettings() {
             type="text"
             placeholder={t("lan.groupPlaceholder")}
             value={group}
-            disabled={!shareOut}
+            disabled={shareOut}
             onChange={(e) => setGroup(e.target.value)}
           />
         </div>
@@ -234,7 +234,7 @@ export function LanSettings() {
               autoComplete="new-password"
               placeholder={hasKey ? t("lan.keyPlaceholderKeep") : t("lan.keyPlaceholder")}
               value={key}
-              disabled={!shareOut}
+              disabled={shareOut}
               onChange={(e) => setKey(e.target.value)}
             />
             <button
@@ -242,6 +242,7 @@ export function LanSettings() {
               className="input-reveal"
               title={t("lan.toggleKey")}
               aria-label={t("lan.toggleKey")}
+              disabled={shareOut}
               onClick={async () => {
                 const next = !showKey;
                 // 已设置过密钥但输入框为空（留空=保持现有密钥）时，
@@ -277,7 +278,7 @@ export function LanSettings() {
             type="text"
             placeholder={t("lan.namePlaceholder")}
             value={name}
-            disabled={!shareOut}
+            disabled={shareOut}
             onChange={(e) => setName(e.target.value)}
           />
         </div>
@@ -300,7 +301,7 @@ export function LanSettings() {
             min={1}
             max={65535}
             value={listenPort}
-            disabled={!shareOut}
+            disabled={shareOut}
             onChange={(e) => {
               setListenPort(Number(e.target.value));
               setPortError("");
@@ -317,20 +318,18 @@ export function LanSettings() {
             min={1}
             max={1024}
             value={fileLimitMb}
-            disabled={!shareOut}
             onChange={(e) => setFileLimitMb(Number(e.target.value))}
           />
         </div>
 
         <div className="settings-row settings-row-column">
-          <span>{t("lan.shareTypes")}</span>
+          <span className="lan-share-types-head">{t("lan.shareTypes")}</span>
           <div className="lan-share-types">
             {SHARE_TYPES.map((tp) => (
               <label key={tp} className="checkbox-inline">
                 <input
                   type="checkbox"
                   checked={shareTypes.includes(tp)}
-                  disabled={!shareOut}
                   onChange={(e) => {
                     const next = e.target.checked
                       ? [...shareTypes, tp]
@@ -357,7 +356,7 @@ export function LanSettings() {
             rows={3}
             placeholder={t("lan.manualPeersPlaceholder", { port })}
             value={manualPeers}
-            disabled={!shareOut}
+            disabled={shareOut}
             onChange={(e) => setManualPeers(e.target.value)}
           />
           <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>

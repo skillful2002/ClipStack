@@ -1460,6 +1460,12 @@
   padding: 4px 0;
 }
 
+/* 共享类型标题：与主标签（如「本机端口」）保持一致的样式（14px / 主色）。 */
+.lan-share-types-head {
+  color: var(--cs-text-primary);
+  font-size: 14px;
+}
+
 .checkbox-inline {
   display: inline-flex;
   align-items: center;
