@@ -108,7 +108,7 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
             match current_change_count() {
                 Some(count) if count != last_count => {
                     last_count = count;
-                    if let Some(item) = capture(&db, &state) {
+                    if let Some((item, blob)) = capture(&db, &state) {
                         let _ = app.emit("clipboard-changed", &item);
                         // L3 · 局域网共享：本地捕获成功后（若已开启 share_out）广播给 mesh 对端。
                         // 仅在「真实 OS 剪贴板变更」分支触发，对端写入不重复触发，避免回环放大。
@@ -118,7 +118,7 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
                             let txt = item.content_text.clone();
                             let src = item.source_app.clone();
                             tauri::async_runtime::spawn(async move {
-                                mgr.broadcast_local(&ct, &txt, &src).await;
+                                mgr.broadcast_local(&ct, &txt, &src, blob).await;
                             });
                         }
                         println!(
@@ -134,7 +134,8 @@ pub fn start_monitor(app: AppHandle, state: Arc<Mutex<MonitorState>>, db: DbStat
 }
 
 /// 读取 + 分类 + 去重 + 来源过滤 + 落库，产出可广播的条目；被忽略 / 去重 / 无内容 / 落库失败返回 None。
-fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> {
+/// 返回 `(条目, 二进制)`：二进制用于局域网广播（图片为 PNG 字节、文件为 JSON 路径数组），文本类为 `None`。
+fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<(HistoryItem, Option<Vec<u8>>)> {
     // 内部数据库加密密钥在启动阶段已载入内存（db.key 常驻），用于落库加密；
     // 主密码仅作为「应用锁」凭据，不影响此处加密。因此无论是否锁定、是否启用主密码，
     // 捕获到的内容都以内部密钥加密存储，复制永不丢失。
@@ -242,22 +243,25 @@ fn capture(db: &AppDb, state: &Arc<Mutex<MonitorState>>) -> Option<HistoryItem> 
         }
     };
 
-    Some(HistoryItem {
-        id,
-        content_type,
-        content_text,
-        preview,
-        source_app: source,
-        size_bytes: new.size_bytes,
-        hash: new.hash,
-        is_pinned,
-        is_favorite,
-        is_sensitive,
-        created_at: timestamp,
-        origin_device: String::new(),
-        is_remote: false,
-        deleted_at: None,
-    })
+    Some((
+        HistoryItem {
+            id,
+            content_type,
+            content_text,
+            preview,
+            source_app: source,
+            size_bytes: new.size_bytes,
+            hash: new.hash,
+            is_pinned,
+            is_favorite,
+            is_sensitive,
+            created_at: timestamp,
+            origin_device: String::new(),
+            is_remote: false,
+            deleted_at: None,
+        },
+        new.content_blob,
+    ))
 }
 
 /// 用 arboard 读取剪贴板：文件优先，其次图片，再次文本。

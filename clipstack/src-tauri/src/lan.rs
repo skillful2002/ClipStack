@@ -17,7 +17,7 @@ use futures_util::{SinkExt, StreamExt};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc};
@@ -484,14 +484,20 @@ impl LanManager {
 
     /// L3 · 本地捕获后广播（由监控线程调用）。仅当 `share_out` 开启时广播；
     /// 未配置共享（组/密钥空）时 `share_out` 恒为关闭，故不会误广播。
+    /// `content_blob` 为本地落库的二进制（图片为 PNG 字节、文件为 JSON 路径数组），
+    /// 文本 / 链接 / 代码类为 `None`——据此决定真正的明文负载。
     /// 返回推送到的对端数。
     pub async fn broadcast_local(
         &self,
         content_type: &str,
         content_text: &str,
         source_app: &str,
+        content_blob: Option<Vec<u8>>,
     ) -> usize {
-        let share_out = self.inner.lock().await.config.share_out;
+        let (share_out, file_limit_mb) = {
+            let inner = self.inner.lock().await;
+            (inner.config.share_out, inner.config.file_limit_mb)
+        };
         if !share_out {
             return 0;
         }
@@ -502,14 +508,37 @@ impl LanManager {
             "file" => ClipKind::File,
             _ => ClipKind::Text,
         };
+        // 真实明文负载：
+        // - 图片用 PNG 字节（之前误把「WxH 图片」占位文本当负载，导致对端收不到图片）；
+        // - 文件用二进制 bundle（文件名 + 字节），跨端物理传输后落盘到本机 share 目录；
+        // - 文本 / 链接 / 代码用原文。
+        let (payload, hash) = match kind {
+            ClipKind::Image => {
+                let b = content_blob.unwrap_or_default();
+                let h = ClipboardItem::content_hash(&b);
+                (b, h)
+            }
+            ClipKind::File => {
+                let limit = file_limit_mb * 1024 * 1024;
+                let entries = build_file_entries(&content_blob, limit);
+                let bundle = encode_file_bundle(&entries);
+                let h = ClipboardItem::content_hash(&bundle);
+                (bundle, h)
+            }
+            _ => {
+                let t = content_text.as_bytes().to_vec();
+                let h = ClipboardItem::content_hash(&t);
+                (t, h)
+            }
+        };
         let item = ClipboardItem {
             sync_id: Uuid::new_v4().to_string(),
             device_id: String::new(), // 由 broadcast_clip 时覆盖为本地 device_id
             source_app: source_app.to_string(),
             lamport: 0,
             kind,
-            hash: ClipboardItem::content_hash(content_text.as_bytes()),
-            payload: content_text.as_bytes().to_vec(),
+            hash,
+            payload,
         };
         self.broadcast_clip(item).await
     }
@@ -741,7 +770,86 @@ where
                         Ok(IngestOutcome::Stored(r)) => {
                             // 落库（is_remote=1）+ 通知前端/托盘刷新。
                             let ct_str = kind_name(r.item.kind);
-                            let text = String::from_utf8_lossy(&r.item.payload).to_string();
+                            // 文本 / 链接 / 代码：payload 即原文；图片 / 文件：payload 为二进制，
+                            // 落库为 content_blob（图片为 PNG 字节、文件为 JSON 路径数组）。
+                            // 之前 image 把乱码 UTF-8 当 content_text、content_blob 恒为 None，
+                            // 导致对端 get_item_blob 读到空，前端显示「加载图片失败」。
+                            let is_binary = matches!(r.item.kind, ClipKind::Image | ClipKind::File);
+                            let (text, blob, size_bytes) = if is_binary {
+                                if r.item.kind == ClipKind::Image {
+                                    let label = png_dimensions_label(&r.item.payload)
+                                        .unwrap_or_else(|| "图片".to_string());
+                                    (
+                                        label,
+                                        Some(r.item.payload.clone()),
+                                        r.item.payload.len() as i64,
+                                    )
+                                } else {
+                                    // 文件：解 bundle 并物理落盘到 `~/.clipstack/share/<sync_id>/`，
+                                    // content_text / content_blob 改存本机本地路径，使对端可真正复制使用。
+                                    // 旧端兼容：bundle 解析失败（对端为旧版，payload 为 JSON 路径）则按原样存储（本机不可用，仅展示）。
+                                    match decode_file_bundle(&r.item.payload) {
+                                        Some(entries) => {
+                                            let (joined, blob, size) = match app_r.path().home_dir() {
+                                                Ok(home) => {
+                                                    let dir = share_dir(&home, &r.item.sync_id);
+                                                    let _ = std::fs::create_dir_all(&dir);
+                                                    let mut local_paths: Vec<String> = Vec::new();
+                                                    let mut total: u64 = 0;
+                                                    for (name, data) in entries {
+                                                        // name 来自网络，仅取文件名校验分量，防目录穿越。
+                                                        let fname = std::path::Path::new(&name)
+                                                            .file_name()
+                                                            .map(|n| n.to_string_lossy().into_owned())
+                                                            .unwrap_or_default();
+                                                        if fname.is_empty() {
+                                                            continue;
+                                                        }
+                                                        let dest = dir.join(&fname);
+                                                        if std::fs::write(&dest, &data).is_ok() {
+                                                            total += data.len() as u64;
+                                                            local_paths
+                                                                .push(dest.to_string_lossy().into_owned());
+                                                        } else {
+                                                            eprintln!("[lan] 写入共享文件失败: {dest:?}");
+                                                        }
+                                                    }
+                                                    let joined = local_paths.join(", ");
+                                                    let blob = serde_json::to_vec(&local_paths)
+                                                        .unwrap_or_default();
+                                                    (joined, blob, total as i64)
+                                                }
+                                                Err(_) => {
+                                                    eprintln!("[lan] 无法定位 home 目录，共享文件未落盘");
+                                                    let paths: Vec<String> =
+                                                        serde_json::from_slice(&r.item.payload)
+                                                            .unwrap_or_default();
+                                                    let joined = paths.join(", ");
+                                                    let len = joined.len() as i64;
+                                                    (joined, r.item.payload.clone(), len)
+                                                }
+                                            };
+                                            (joined, Some(blob), size as i64)
+                                        }
+                                        None => {
+                                            let paths: Vec<String> =
+                                                serde_json::from_slice(&r.item.payload)
+                                                    .unwrap_or_default();
+                                            let joined = paths.join(", ");
+                                            let size: u64 = paths
+                                                .iter()
+                                                .filter_map(|p| std::fs::metadata(p).ok())
+                                                .map(|m| m.len())
+                                                .sum();
+                                            (joined, Some(r.item.payload.clone()), size as i64)
+                                        }
+                                    }
+                                }
+                            } else {
+                                let text = String::from_utf8_lossy(&r.item.payload).to_string();
+                                let len = text.len() as i64;
+                                (text, None, len)
+                            };
                             let sync_id = r.item.sync_id.clone();
                             let src_app = r.item.source_app.clone();
                             // 对端友好设备名：mDNS ServiceResolved 时按 device_id 存入 peer_names。
@@ -770,9 +878,9 @@ where
                                         key: key.as_ref(),
                                         content_type: &ct_str,
                                         content_text: &text,
-                                        content_blob: None,
+                                        content_blob: blob.as_deref(),
                                         source_app: &src_app,
-                                        size_bytes: text.len() as i64,
+                                        size_bytes,
                                         hash: &hash,
                                         is_sensitive: false,
                                         origin_device: &dev_name,
@@ -790,7 +898,7 @@ where
                                             content_text: text.clone(),
                                             preview: text.clone(),
                                             source_app: src_app.clone(),
-                                            size_bytes: text.len() as i64,
+                                            size_bytes,
                                             hash: hash.clone(),
                                             is_pinned: false,
                                             is_favorite: false,
@@ -1025,6 +1133,123 @@ fn content_type_from_str(s: &str) -> ContentType {
     }
 }
 
+/// 从 PNG 字节解析尺寸，生成「WxH 图片」占位文本（与本地捕获展示一致）。
+/// 解析失败（非 PNG / 字节不足）返回 None，调用方回退为「图片」。
+fn png_dimensions_label(blob: &[u8]) -> Option<String> {
+    const SIG: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+    if blob.len() < 24 || &blob[..8] != SIG {
+        return None;
+    }
+    let width = u32::from_be_bytes([blob[16], blob[17], blob[18], blob[19]]);
+    let height = u32::from_be_bytes([blob[20], blob[21], blob[22], blob[23]]);
+    Some(format!("{width}×{height} 图片"))
+}
+
+/// 局域网共享「文件」的物理落盘目录：`~/.clipstack/share/<sync_id>/`。
+/// 按对端 `sync_id` 分子目录，避免不同共享项同名文件互相覆盖。
+fn share_dir(home: &std::path::Path, sync_id: &str) -> std::path::PathBuf {
+    home.join(".clipstack").join("share").join(sync_id)
+}
+
+/// 将一组「文件名 + 字节」编码为自描述的二进制 bundle（用于跨端传输文件内容）。
+/// 文件类型（`ClipKind::File`）的 `payload` 由本格式承载，与图片（裸 PNG）、文本（裸 UTF-8）区分。
+/// 格式：文件数(u32 BE) + 每文件[名称长度(u32 BE) + 名称(UTF-8) + 数据长度(u64 BE) + 数据]。
+fn encode_file_bundle(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for (name, data) in entries {
+        let nb = name.as_bytes();
+        out.extend_from_slice(&(nb.len() as u32).to_be_bytes());
+        out.extend_from_slice(nb);
+        out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+        out.extend_from_slice(data);
+    }
+    out
+}
+
+/// 解码 `encode_file_bundle` 的产物；格式损坏返回 None（接收端据此回退为旧版 JSON 路径兼容）。
+fn decode_file_bundle(blob: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
+    if blob.len() < 4 {
+        return None;
+    }
+    let count = u32::from_be_bytes([blob[0], blob[1], blob[2], blob[3]]) as usize;
+    let mut pos = 4;
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        if pos + 4 > blob.len() {
+            return None;
+        }
+        let nl = u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
+        pos += 4;
+        if pos + nl > blob.len() {
+            return None;
+        }
+        let name = String::from_utf8(blob[pos..pos + nl].to_vec()).ok()?;
+        pos += nl;
+        if pos + 8 > blob.len() {
+            return None;
+        }
+        let dl = u64::from_be_bytes([
+            blob[pos],
+            blob[pos + 1],
+            blob[pos + 2],
+            blob[pos + 3],
+            blob[pos + 4],
+            blob[pos + 5],
+            blob[pos + 6],
+            blob[pos + 7],
+        ]) as usize;
+        pos += 8;
+        if pos + dl > blob.len() {
+            return None;
+        }
+        let data = blob[pos..pos + dl].to_vec();
+        pos += dl;
+        out.push((name, data));
+    }
+    Some(out)
+}
+
+/// 由本地文件的 JSON 路径数组（`content_blob`）读取每个文件字节，组装跨端传输用 entries。
+/// 单个文件超过 `limit_bytes`（= `file_limit_mb` MB）则跳过，避免超大文件撑爆 WebSocket。
+/// `name` 仅取文件名校验分量（防目录穿越），对端按文件名落盘到本地 share 目录。
+fn build_file_entries(json_paths: &Option<Vec<u8>>, limit_bytes: u64) -> Vec<(String, Vec<u8>)> {
+    let Some(paths) = json_paths else {
+        return Vec::new();
+    };
+    let Ok(paths) = serde_json::from_slice::<Vec<String>>(paths) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for p in paths {
+        let path = std::path::Path::new(&p);
+        let Ok(meta) = std::fs::metadata(path) else {
+            eprintln!("[lan] 共享文件不存在，跳过: {p}");
+            continue;
+        };
+        if meta.len() > limit_bytes {
+            eprintln!(
+                "[lan] 共享文件超过大小上限({}MB)，跳过: {p}",
+                limit_bytes / 1024 / 1024
+            );
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(path) else {
+            eprintln!("[lan] 读取共享文件失败，跳过: {p}");
+            continue;
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        out.push((name, bytes));
+    }
+    out
+}
+
 /// 由文本构造一条待广播的 ClipboardItem（测试 / L3 监控钩子复用）。
 pub fn text_item(text: &str) -> ClipboardItem {
     let payload = text.as_bytes().to_vec();
@@ -1114,5 +1339,46 @@ mod tests {
         assert_eq!(reloaded.file_limit_mb, 50);
         assert_eq!(reloaded.manual_peers, vec!["192.168.1.5:21995".to_string()]);
         assert_eq!(reloaded.listen_port, 21996);
+    }
+
+    #[test]
+    fn file_bundle_encode_decode_roundtrip() {
+        // 文件跨端传输的二进制 bundle 必须能无损往返：名称与字节均还原。
+        let entries = vec![
+            ("a.txt".to_string(), b"hello".to_vec()),
+            ("b.bin".to_string(), vec![0u8, 1, 2, 255, 254]),
+            ("".to_string(), Vec::new()),
+        ];
+        let bundle = encode_file_bundle(&entries);
+        let back = decode_file_bundle(&bundle).expect("bundle 应可解码");
+        assert_eq!(back.len(), entries.len());
+        assert_eq!(back[0], entries[0]);
+        assert_eq!(back[1], entries[1]);
+        assert_eq!(back[2], entries[2]);
+    }
+
+    #[test]
+    fn file_bundle_decode_rejects_garbage() {
+        // 非 bundle 数据（如旧版 JSON 路径数组）解析必须失败，触发旧端兼容回退。
+        let json = serde_json::to_vec(&vec!["/Users/x/a.png"]).unwrap();
+        assert!(decode_file_bundle(&json).is_none());
+        assert!(decode_file_bundle(&[]).is_none());
+        assert!(decode_file_bundle(&[1, 2, 3]).is_none());
+    }
+
+    #[test]
+    fn png_dimensions_label_parses_ihdr() {
+        // 构造最小合法 PNG（仅 8 字节签名 + IHDR），验证尺寸解析与「WxH 图片」占位。
+        let mut png = vec![
+            137, 80, 78, 71, 13, 10, 26, 10, // 签名
+            0, 0, 0, 13, // IHDR 长度
+            73, 72, 68, 82, // "IHDR"
+        ];
+        // 宽 0x0000000A=10，高 0x00000014=20
+        png.extend_from_slice(&[0, 0, 0, 10, 0, 0, 0, 20]);
+        png.extend_from_slice(&[8, 6, 0, 0, 0]); // 其余 IHDR 字段
+        assert_eq!(png_dimensions_label(&png), Some("10×20 图片".to_string()));
+        // 非 PNG 数据应返回 None。
+        assert_eq!(png_dimensions_label(b"not a png"), None);
     }
 }
