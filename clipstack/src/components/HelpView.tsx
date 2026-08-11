@@ -80,12 +80,37 @@ export function HelpView() {
         </Section>
 
         <Section title={t("help.settings")}>
+          <p className="help-p">{t("help.settingsTabs")}</p>
+
+          <h4 className="help-sub">{t("settings.tabGeneral")}</h4>
           <ul className="help-ul">
             <li>{t("help.settingsAppearance")}</li>
             <li>{t("help.settingsLanguage")}</li>
             <li>{t("help.settingsStorage")}</li>
+            <li>{t("help.settingsRetention")}</li>
+            <li>{t("help.settingsSaveTypes")}</li>
             <li>{t("help.settingsStartup")}</li>
+          </ul>
+
+          <h4 className="help-sub">{t("settings.tabSecurity")}</h4>
+          <ul className="help-ul">
+            <li>{t("help.settingsIgnoredApps")}</li>
             <li>{t("help.settingsSecurity")}</li>
+            <li>{t("help.settingsMask")}</li>
+            <li>{t("help.settingsTouchId")}</li>
+            <li>{t("help.settingsAutoLock")}</li>
+          </ul>
+
+          <h4 className="help-sub">{t("settings.tabSharing")}</h4>
+          <ul className="help-ul">
+            <li>{t("help.lanSettings")}</li>
+            <li>{t("help.lanPrereq")}</li>
+            <li>{t("help.lanShareOut")}</li>
+            <li>{t("help.lanTray")}</li>
+            <li>{t("help.lanManualPeer")}</li>
+            <li>{t("help.lanOnlineDevices")}</li>
+            <li>{t("help.lanPackage")}</li>
+            <li>{t("help.lanSaveAs")}</li>
           </ul>
         </Section>
 
@@ -108,7 +133,12 @@ export function HelpView() {
           <p className="help-p">{t("help.syncText")}</p>
           <ul className="help-ul">
             <li>{t("help.lanPrereq")}</li>
+            <li>{t("help.lanSettings")}</li>
+            <li>{t("help.lanShareOut")}</li>
             <li>{t("help.lanTray")}</li>
+            <li>{t("help.lanManualPeer")}</li>
+            <li>{t("help.lanOnlineDevices")}</li>
+            <li>{t("help.lanPackage")}</li>
             <li>{t("help.lanSaveAs")}</li>
           </ul>
         </Section>

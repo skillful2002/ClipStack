@@ -886,6 +886,7 @@
 
 .about-back {
   align-self: flex-start;
+  flex-shrink: 0;
   padding: 8px 18px;
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-md);
@@ -894,6 +895,36 @@
   font-size: 13px;
   cursor: pointer;
   margin-top: 4px;
+}
+
+/* 帮助卡片占满剩余高度，内容过长时自身滚动；标题与返回按钮固定在上下两端。 */
+.help-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 16px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cs-text-tertiary) transparent;
+}
+
+.help-card::-webkit-scrollbar {
+  width: 10px;
+}
+
+.help-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.help-card::-webkit-scrollbar-thumb {
+  background: var(--cs-text-tertiary);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.help-card::-webkit-scrollbar-thumb:hover {
+  background: var(--cs-accent);
+  background-clip: content-box;
 }
 
 .about-back:hover {
@@ -916,6 +947,14 @@
   font-weight: 700;
   margin: 0 0 8px;
   color: var(--cs-text-primary);
+}
+
+/* 帮助页「设置」分标签展示时的二级小标题（通用 / 安全 / 共享）。 */
+.help-sub {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+  color: var(--cs-accent);
 }
 
 .help-content {

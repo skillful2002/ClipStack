@@ -24,6 +24,7 @@ ClipStack is a **cross-platform clipboard manager** that lives in your menu bar 
 - **Privacy fence (ignored apps)**: Skip specific apps (e.g. password managers) by typing a name or picking from installed apps; matched apps are never captured.
 - **Multilingual UI**: Built-in 简体中文 / 繁體中文 / English / 日本語 / Deutsch / Français, following the system or set manually.
 - **Lightweight**: Rust backend with the system's native WebView — **no Node runtime** — so its resident memory footprint is far below comparable Electron-based tools.
+- **LAN Sharing (LAN sync)**: Devices on the same local network (WiFi / wired) can share a clipboard with end-to-end encryption — no server, no cloud. Configure the share group / share key / port, file size limit, shared-type filter, and manual peers in Settings → LAN Sharing; toggle sharing from the tray menu's "Share" item, whose status dot shows the current state. Large files and macOS packages (e.g. `.rtfd`) transfer intact, and received images / files can be saved to this device via "Save as".
 
 ---
 
