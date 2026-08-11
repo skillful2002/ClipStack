@@ -200,6 +200,8 @@ const zhCN: Dict = {
   "lan.peerOnline": "{name} 已上线",
   "lan.peerOffline": "{name} 已离线",
   "lan.receivedFrom": "收到来自 {name} 的剪贴板",
+  "lan.shareTypes": "共享类型",
+  "lan.shareTypesHint": "选择允许共享的内容类型；未勾选的类型不会被广播给组内其它设备。",
   "item.local": "本机",
 
   "about.title": "关于系统",
@@ -474,6 +476,8 @@ const zhTW: Dict = {
   "lan.peerOnline": "{name} 已上線",
   "lan.peerOffline": "{name} 已離線",
   "lan.receivedFrom": "收到來自 {name} 的剪貼簿",
+  "lan.shareTypes": "共用類型",
+  "lan.shareTypesHint": "選擇允許共用的內容類型；未勾選的類型不會廣播給組內其它裝置。",
   "item.local": "本機",
 
   "about.title": "關於系統",
@@ -748,6 +752,8 @@ const en: Dict = {
   "lan.peerOnline": "{name} came online",
   "lan.peerOffline": "{name} went offline",
   "lan.receivedFrom": "Clipboard received from {name}",
+  "lan.shareTypes": "Share types",
+  "lan.shareTypesHint": "Choose which content types to share; unchecked types are not broadcast to other devices in the group.",
   "item.local": "This device",
 
   "about.title": "About",
@@ -1022,6 +1028,8 @@ const ja: Dict = {
   "lan.peerOnline": "{name} がオンラインになりました",
   "lan.peerOffline": "{name} がオフラインになりました",
   "lan.receivedFrom": "{name} からクリップボードを受信しました",
+  "lan.shareTypes": "共有タイプ",
+  "lan.shareTypesHint": "共有するコンテンツタイプを選択します。チェックされていないタイプはグループ内の他デバイスに配信されません。",
   "item.local": "このデバイス",
 
   "about.title": "バージョン情報",
@@ -1296,6 +1304,8 @@ const de: Dict = {
   "lan.peerOnline": "{name} ist online",
   "lan.peerOffline": "{name} ist offline",
   "lan.receivedFrom": "Zwischenablage von {name} empfangen",
+  "lan.shareTypes": "Freigabetypen",
+  "lan.shareTypesHint": "Wählen Sie die freizugebenden Inhaltstypen; nicht markierte Typen werden nicht an andere Geräte in der Gruppe übertragen.",
   "item.local": "Dieses Gerät",
 
   "about.title": "Über",
@@ -1570,6 +1580,8 @@ const fr: Dict = {
   "lan.peerOnline": "{name} est en ligne",
   "lan.peerOffline": "{name} est hors ligne",
   "lan.receivedFrom": "Presse-papiers reçu de {name}",
+  "lan.shareTypes": "Types partagés",
+  "lan.shareTypesHint": "Choisissez les types de contenu à partager ; les types non cochés ne sont pas diffusés aux autres appareils du groupe.",
   "item.local": "Cet appareil",
 
   "about.title": "À propos",

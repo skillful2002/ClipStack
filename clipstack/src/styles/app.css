@@ -1222,6 +1222,75 @@
   box-shadow: none;
 }
 
+/* 共享文件配置组（位于 LAN 共享设置之后）。 */
+/* 关闭共享时，局域网共享分组的输入框 / 文本域文字变暗，与可配置状态明显区分 */
+.settings-row input:disabled,
+.settings-row textarea:disabled {
+  color: var(--cs-text-tertiary);
+  -webkit-text-fill-color: var(--cs-text-tertiary);
+  opacity: 0.7;
+}
+.settings-row .switch input:disabled + .slider {
+  opacity: 0.5;
+}
+.lan-share-types input:disabled + span {
+  color: var(--cs-text-tertiary);
+  opacity: 0.7;
+}
+.share-files-stat {
+  font-variant-numeric: tabular-nums;
+  color: var(--cs-text-secondary);
+  text-align: right;
+}
+.share-folder-path-title {
+  font-size: 13px;
+  color: var(--cs-text-tertiary);
+  margin: 4px 0 0;
+}
+.share-folder-path {
+  margin: 6px 0 0;
+  font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cs-text-tertiary);
+  word-break: break-all;
+  user-select: text;
+}
+.settings-row-actions {
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.settings-row-actions button {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--cs-bg);
+  color: var(--cs-text-primary);
+  transition: background 0.15s ease, filter 0.15s ease;
+}
+.settings-row-actions button:hover:not(:disabled) {
+  background: var(--cs-bg-hover);
+}
+.settings-row-actions .btn-secondary {
+  border-color: var(--cs-accent);
+  color: var(--cs-accent);
+}
+.settings-row-actions .btn-danger {
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+.settings-row-actions .btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+.settings-row-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--cs-border);
@@ -1318,6 +1387,35 @@
   padding: 2px 10px;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+/* 共享类型：文本 / 图片 / 文件 横向排列的勾选项。 */
+.lan-share-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--cs-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-inline input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cs-accent);
+  cursor: pointer;
+}
+
+.checkbox-inline input:disabled {
+  cursor: not-allowed;
 }
 
 .lan-port-error {

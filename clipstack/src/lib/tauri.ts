@@ -192,6 +192,7 @@ export interface LanConfigView {
   name: string;
   shareOut: boolean;
   fileLimitMb: number;
+  shareTypes: string[];
   hasKey: boolean;
   manualPeers: string[];
   port: number;
@@ -221,6 +222,7 @@ export const lanSetConfig = (cfg: {
   name: string;
   shareOut: boolean;
   fileLimitMb: number;
+  shareTypes: string[];
   manualPeers: string[];
   port: number;
 }): Promise<void> =>
@@ -230,6 +232,7 @@ export const lanSetConfig = (cfg: {
     name: cfg.name,
     shareOut: cfg.shareOut,
     fileLimitMb: cfg.fileLimitMb,
+    shareTypes: cfg.shareTypes,
     manualPeers: cfg.manualPeers,
     port: cfg.port,
   });
@@ -237,6 +240,22 @@ export const lanSetConfig = (cfg: {
 /** 切换发布开关（share_out）。 */
 export const lanSetShareOut = (enabled: boolean): Promise<void> =>
   invoke<void>("lan_set_share_out", { enabled });
+
+/** 共享文件统计：[文件数量, 总字节数]。 */
+export const lanShareStats = (): Promise<[number, number]> =>
+  invoke<[number, number]>("lan_share_stats");
+
+/** 返回共享文件夹的绝对路径（用于界面展示）。 */
+export const lanShareFolderPath = (): Promise<string> =>
+  invoke<string>("lan_share_folder_path");
+
+/** 在文件管理器中打开共享文件夹。 */
+export const lanOpenShareFolder = (): Promise<void> =>
+  invoke<void>("lan_open_share_folder");
+
+/** 清空共享文件夹，返回删除的文件数。 */
+export const lanClearShareFiles = (): Promise<number> =>
+  invoke<number>("lan_clear_share_files");
 
 /** 向组内所有已连对端广播一条测试文本，返回实际送达的对端数。 */
 export const lanSendTest = (text: string): Promise<number> =>

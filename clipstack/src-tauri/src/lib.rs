@@ -439,6 +439,10 @@ pub fn run() {
             commands::lan_set_active_profile,
             commands::lan_delete_profile,
             commands::lan_set_share_out,
+            commands::lan_share_stats,
+            commands::lan_share_folder_path,
+            commands::lan_open_share_folder,
+            commands::lan_clear_share_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipStack");

@@ -47,6 +47,8 @@ pub struct LanConfig {
     pub share_out: bool,
     pub file_limit_mb: u64,
     pub manual_peers: Vec<String>,
+    /// 允许共享的内容类型白名单，取值为 "text" | "image" | "file" 的子集，默认三者皆共享。
+    pub share_types: Vec<String>,
     /// 本机 WebSocket 监听端口。默认 LAN_PORT；当该端口被占用（冲突）时，
     /// 用户可在设置中修改为其它端口（如 8790）以规避，并持久化到 settings 表。
     pub listen_port: u16,
@@ -63,6 +65,7 @@ impl Default for LanConfig {
             share_out: false,
             file_limit_mb: 100,
             manual_peers: Vec::new(),
+            share_types: vec!["text".into(), "image".into(), "file".into()],
             listen_port: LAN_PORT,
         }
     }
@@ -141,6 +144,8 @@ fn persist_config(db: &DbState, cfg: &LanConfig) {
     let _ = db::update_setting(&conn, "lan_file_limit_mb", &cfg.file_limit_mb.to_string());
     let peers_json = serde_json::to_string(&cfg.manual_peers).unwrap_or_else(|_| "[]".into());
     let _ = db::update_setting(&conn, "lan_manual_peers", &peers_json);
+    let types_json = serde_json::to_string(&cfg.share_types).unwrap_or_else(|_| "[]".into());
+    let _ = db::update_setting(&conn, "lan_share_types", &types_json);
     let _ = db::update_setting(&conn, "lan_listen_port", &cfg.listen_port.to_string());
 }
 
@@ -165,6 +170,18 @@ fn load_persisted_config(db: &DbState, cfg: &mut LanConfig) {
         &db::get_string_setting(&conn, "lan_manual_peers", "[]"),
     ) {
         cfg.manual_peers = peers;
+    }
+    if let Ok(types) = serde_json::from_str::<Vec<String>>(
+        &db::get_string_setting(&conn, "lan_share_types", "[]"),
+    ) {
+        // 仅保留白名单内的合法类型，避免旧数据/脏数据写入无效值。
+        let valid: Vec<String> = types
+            .into_iter()
+            .filter(|t| matches!(t.as_str(), "text" | "image" | "file"))
+            .collect();
+        if !valid.is_empty() {
+            cfg.share_types = valid;
+        }
     }
     let saved = db::get_int_setting(&conn, "lan_listen_port", LAN_PORT as i64) as u16;
     if (1..=65535).contains(&saved) {
@@ -1149,6 +1166,12 @@ fn png_dimensions_label(blob: &[u8]) -> Option<String> {
 /// 按对端 `sync_id` 分子目录，避免不同共享项同名文件互相覆盖。
 fn share_dir(home: &std::path::Path, sync_id: &str) -> std::path::PathBuf {
     home.join(".clipstack").join("share").join(sync_id)
+}
+
+/// 局域网共享文件根目录：`~/.clipstack/share/`（所有 sync_id 子目录的父目录）。
+/// 供命令层统计/打开/清空共享文件夹时使用。
+pub fn share_root(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".clipstack").join("share")
 }
 
 /// 将一组「文件名 + 字节」编码为自描述的二进制 bundle（用于跨端传输文件内容）。

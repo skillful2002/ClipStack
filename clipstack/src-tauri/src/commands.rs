@@ -656,6 +656,7 @@ pub async fn lan_set_config(
     name: String,
     share_out: bool,
     file_limit_mb: u64,
+    share_types: Vec<String>,
     manual_peers: Vec<String>,
     port: u16,
 ) -> Result<(), String> {
@@ -668,6 +669,14 @@ pub async fn lan_set_config(
     cfg.device_name = name;
     cfg.share_out = share_out;
     cfg.file_limit_mb = file_limit_mb.max(1);
+    // 仅允许白名单内的类型值，避免前端传入脏数据（如 "video"）。
+    let mut ts: Vec<String> = share_types
+        .into_iter()
+        .filter(|t| matches!(t.as_str(), "text" | "image" | "file"))
+        .collect();
+    ts.sort();
+    ts.dedup();
+    cfg.share_types = ts;
     cfg.manual_peers = manual_peers;
     // 端口：0 视为「恢复默认」(LAN_PORT)；u16 天然限制在 1..=65535。
     cfg.listen_port = if port == 0 {
@@ -702,6 +711,7 @@ pub async fn lan_get_config(state: State<'_, LanManager>) -> Result<LanConfigVie
         name: cfg.device_name,
         share_out: cfg.share_out,
         file_limit_mb: cfg.file_limit_mb,
+        share_types: cfg.share_types,
         has_key: !cfg.share_key.is_empty(),
         manual_peers: cfg.manual_peers,
         port: cfg.listen_port,
@@ -720,6 +730,7 @@ pub struct LanConfigView {
     pub name: String,
     pub share_out: bool,
     pub file_limit_mb: u64,
+    pub share_types: Vec<String>,
     pub has_key: bool,
     pub manual_peers: Vec<String>,
     pub port: u16,
@@ -846,6 +857,118 @@ pub async fn lan_delete_profile(
 pub async fn lan_set_share_out(state: State<'_, LanManager>, enabled: bool) -> Result<(), String> {
     state.set_share_out(enabled).await;
     Ok(())
+}
+
+/// 统计共享文件根目录（~/.clipstack/share）下的文件数量与总大小（递归）。
+#[tauri::command]
+pub async fn lan_share_stats(app: AppHandle) -> Result<(u64, u64), String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let root = crate::lan::share_root(&home);
+    let mut count: u64 = 0;
+    let mut size: u64 = 0;
+    if let Ok(mut stack) = std::fs::read_dir(&root) {
+        while let Some(Ok(entry)) = stack.next() {
+            let p = entry.path();
+            if let Ok(meta) = p.metadata() {
+                if meta.is_file() {
+                    count += 1;
+                    size += meta.len();
+                } else if meta.is_dir() {
+                    // 按 sync_id 分桶的子目录，递归累加其中文件。
+                    if let Ok(mut sub) = std::fs::read_dir(&p) {
+                        while let Some(Ok(child)) = sub.next() {
+                            let cp = child.path();
+                            if let Ok(cmeta) = cp.metadata() {
+                                if cmeta.is_file() {
+                                    count += 1;
+                                    size += cmeta.len();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok((count, size))
+}
+
+/// 返回共享文件夹（~/.clipstack/share）的绝对路径，供前端展示。
+#[tauri::command]
+pub async fn lan_share_folder_path(app: AppHandle) -> Result<String, String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    Ok(crate::lan::share_root(&home).to_string_lossy().to_string())
+}
+
+/// 在文件管理器中打开共享文件夹（~/.clipstack/share），不存在则先创建。
+#[tauri::command]
+pub async fn lan_open_share_folder(app: AppHandle) -> Result<(), String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let root = crate::lan::share_root(&home);
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let path = root.to_string_lossy().to_string();
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(&path).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("explorer").arg(&path).status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(&path).status();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let status: Result<std::process::ExitStatus, std::io::Error> =
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported platform"));
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("open failed, exit code {s}")),
+        Err(e) => Err(format!("open failed: {e}")),
+    }
+}
+
+/// 清空共享文件夹（~/.clipstack/share）内的全部文件与子目录，返回删除的文件数。
+#[tauri::command]
+pub async fn lan_clear_share_files(app: AppHandle) -> Result<u64, String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let root = crate::lan::share_root(&home);
+    let mut removed: u64 = 0;
+    if !root.exists() {
+        return Ok(0);
+    }
+    let mut stack = std::fs::read_dir(&root).map_err(|e| e.to_string())?;
+    while let Some(Ok(entry)) = stack.next() {
+        let p = entry.path();
+        if let Ok(meta) = p.metadata() {
+            if meta.is_file() {
+                if std::fs::remove_file(&p).is_ok() {
+                    removed += 1;
+                }
+            } else if meta.is_dir() {
+                // 递归删除整目录并累加其中文件数。
+                removed += remove_dir_all_count(&p);
+                let _ = std::fs::remove_dir(&p);
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// 递归删除目录并返回删除的文件数（尽力而为，不要求每个文件都成功）。
+fn remove_dir_all_count(dir: &std::path::Path) -> u64 {
+    let mut count: u64 = 0;
+    if let Ok(mut stack) = std::fs::read_dir(dir) {
+        while let Some(Ok(entry)) = stack.next() {
+            let p = entry.path();
+            if let Ok(meta) = p.metadata() {
+                if meta.is_file() {
+                    if std::fs::remove_file(&p).is_ok() {
+                        count += 1;
+                    }
+                } else if meta.is_dir() {
+                    count += remove_dir_all_count(&p);
+                    let _ = std::fs::remove_dir(&p);
+                }
+            }
+        }
+    }
+    count
 }
 
 /// 内部：用内部数据库密钥加密共享密钥（包装为 wrapped_key 落库）。

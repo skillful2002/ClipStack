@@ -8,6 +8,9 @@ import * as api from "../lib/tauri";
 import { useT } from "../lib/i18n";
 import { useHistory } from "../store/history";
 
+/** 可共享的内容类型白名单，顺序即界面展示顺序。 */
+const SHARE_TYPES = ["text", "image", "file"] as const;
+
 export function LanSettings() {
   const t = useT();
   const setToast = useHistory((s) => s.setToast);
@@ -19,6 +22,7 @@ export function LanSettings() {
   const [shareOut, setShareOut] = useState(false);
   const [fileLimitMb, setFileLimitMb] = useState(100);
   const [manualPeers, setManualPeers] = useState("");
+  const [shareTypes, setShareTypes] = useState<string[]>([...SHARE_TYPES]);
   const [hasKey, setHasKey] = useState(false);
   const [port, setPort] = useState(21995);
   const [listenPort, setListenPort] = useState(21995);
@@ -48,6 +52,11 @@ export function LanSettings() {
         setName(cfg.name);
         setShareOut(cfg.shareOut);
         setFileLimitMb(cfg.fileLimitMb);
+        setShareTypes(
+          cfg.shareTypes && cfg.shareTypes.length > 0
+            ? cfg.shareTypes.filter((x) => (SHARE_TYPES as readonly string[]).includes(x))
+            : [...SHARE_TYPES],
+        );
         setHasKey(cfg.hasKey);
         setPort(cfg.port);
         setListenPort(cfg.port);
@@ -100,6 +109,7 @@ export function LanSettings() {
         name: name.trim(),
         shareOut,
         fileLimitMb: Math.max(1, Math.min(1024, fileLimitMb || 100)),
+        shareTypes,
         manualPeers: peersList,
         port: listenPort || 0, // 0 由后端回退为默认 LAN_PORT
       });
@@ -247,6 +257,29 @@ export function LanSettings() {
             value={fileLimitMb}
             onChange={(e) => setFileLimitMb(Number(e.target.value))}
           />
+        </div>
+
+        <div className="settings-row settings-row-column">
+          <span>{t("lan.shareTypes")}</span>
+          <div className="lan-share-types">
+            {SHARE_TYPES.map((tp) => (
+              <label key={tp} className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={shareTypes.includes(tp)}
+                  disabled={!shareOut}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...shareTypes, tp]
+                      : shareTypes.filter((x) => x !== tp);
+                    setShareTypes(next);
+                  }}
+                />
+                <span>{t(`type.${tp}`)}</span>
+              </label>
+            ))}
+          </div>
+          <p className="settings-hint">{t("lan.shareTypesHint")}</p>
         </div>
 
         <div className="settings-row settings-row-column">

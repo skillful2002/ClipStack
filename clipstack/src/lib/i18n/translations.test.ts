@@ -45,6 +45,8 @@ const LAN_KEYS = [
   "lan.peerOnline",
   "lan.peerOffline",
   "lan.receivedFrom",
+  "lan.shareTypes",
+  "lan.shareTypesHint",
   "item.local",
 ];
 
