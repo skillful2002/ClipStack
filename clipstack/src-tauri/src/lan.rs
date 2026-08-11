@@ -398,8 +398,25 @@ impl LanManager {
         }
     }
 
-    /// 更新配置并重启发现（组/密钥变更需重新注册 mDNS 指纹）。
+    /// 更新配置。
+    ///
+    /// 仅当真正需要重建网络栈的参数变化时才 `stop()` + `start()`：
+    /// 共享组 / 密钥（决定 mDNS 指纹）、本机端口（需重新绑定监听）、共享开关
+    /// （关闭要停发现、开启要起发现）。这三类变更频率低且用户有明确预期。
+    ///
+    /// 文件大小上限、共享类型白名单、本机设备名属于「热参数」：仅就地更新配置与派生
+    /// 密钥，**不拆除任何连接、不清空对端名称缓存**。否则每次改动（尤其是文件上限输入框
+    /// 的逐字符输入）都会 `stop()` + `start()`，导致：① 正在传输的文件因连接被 tearing
+    /// down 而丢失；② `peer_names` 被清空，随后收到的剪贴板来源回退为设备 ID。
     pub async fn set_config(&self, cfg: LanConfig) {
+        let need_restart = {
+            let inner = self.inner.lock().await;
+            let old = &inner.config;
+            old.share_group != cfg.share_group
+                || old.share_key != cfg.share_key
+                || old.listen_port != cfg.listen_port
+                || old.share_out != cfg.share_out
+        };
         {
             let mut inner = self.inner.lock().await;
             inner.config = cfg.clone();
@@ -408,9 +425,11 @@ impl LanManager {
             // 持久化全部配置（含密钥包装），重启后仍生效。
             persist_config(&inner.db, &cfg);
         }
-        // 停掉旧的 mDNS，重新 start。
-        self.stop().await;
-        self.start().await;
+        if need_restart {
+            // 停掉旧的 mDNS，重新 start。
+            self.stop().await;
+            self.start().await;
+        }
     }
 
     /// 停止发现与所有连接。
@@ -428,7 +447,9 @@ impl LanManager {
             inner.client_stops.clear();
             inner.conns.clear();
             inner.known_peers.clear();
-            inner.peer_names.clear();
+            // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
+            // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
+            // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
             // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
             (inner.server_task.take(), removed)
         };

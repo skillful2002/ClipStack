@@ -1456,6 +1456,13 @@
   word-break: break-all;
 }
 
+/* 局域网共享设置组内分隔线，用于把「共享运行参数」与「共享内容配置」分组隔开。 */
+.lan-divider {
+  border: none;
+  border-top: 1px solid var(--cs-border, #e3e3e8);
+  margin: 18px 0;
+}
+
 /* 共享类型：文本 / 图片 / 文件 横向排列的勾选项。 */
 .lan-share-types {
   display: flex;

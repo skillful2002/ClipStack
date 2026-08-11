@@ -291,7 +291,9 @@ export function LanSettings() {
             onChange={(e) => setName(e.target.value)}
           />
         </div>
-        <p className="settings-hint lan-device-id-hint">{deviceId}</p>
+        <p className="settings-hint lan-device-id-hint">
+          {t("lan.deviceId")}：{deviceId}
+        </p>
 
         <div className="settings-row">
           <span>{t("lan.localIp")}</span>
@@ -319,6 +321,26 @@ export function LanSettings() {
         </div>
         <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
         {portError && <p className="settings-hint lan-port-error">{portError}</p>}
+
+        <div className="settings-row settings-row-column">
+          <span className="lan-manual-head">
+            {t("lan.manualPeers")}
+            <code className="lan-port-badge">
+              {t("lan.port")} {port}
+            </code>
+          </span>
+          <textarea
+            className="lan-peers"
+            rows={3}
+            placeholder={t("lan.manualPeersPlaceholder", { port })}
+            value={manualPeers}
+            disabled={shareOut}
+            onChange={(e) => setManualPeers(e.target.value)}
+          />
+          <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
+        </div>
+
+        <hr className="lan-divider" />
 
         <div className="settings-row">
           <span>{t("lan.fileLimit")}</span>
@@ -361,24 +383,6 @@ export function LanSettings() {
           <p className="settings-hint">{t("lan.shareTypesHint")}</p>
         </div>
 
-        <div className="settings-row settings-row-column">
-          <span className="lan-manual-head">
-            {t("lan.manualPeers")}
-            <code className="lan-port-badge">
-              {t("lan.port")} {port}
-            </code>
-          </span>
-          <textarea
-            className="lan-peers"
-            rows={3}
-            placeholder={t("lan.manualPeersPlaceholder", { port })}
-            value={manualPeers}
-            disabled={shareOut}
-            onChange={(e) => setManualPeers(e.target.value)}
-          />
-          <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
-        </div>
-
         <div className="settings-actions">
           <button disabled={testing} onClick={() => void onTest()}>
             {testing ? t("lan.testing") : t("lan.testSend")}
@@ -410,10 +414,7 @@ export function LanSettings() {
         <div className="settings-list">
           {/* 本机置顶：确认本机在线与共享状态（本机不进入远端连接列表） */}
           <div className="settings-list-item lan-self">
-            <span className="item-name">
-              {name || t("lan.thisDevice")}
-              <span className="lan-peer-addr"> {deviceId}</span>
-            </span>
+            <span className="item-name">{name || t("lan.thisDevice")}</span>
             <span className={`lan-self-status${shareOut ? " on" : ""}`}>
               {shareOut ? t("lan.sharing") : t("lan.shareStopped")}
             </span>
