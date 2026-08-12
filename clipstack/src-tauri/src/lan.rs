@@ -148,6 +148,9 @@ fn persist_config(db: &DbState, cfg: &LanConfig) {
     let types_json = serde_json::to_string(&cfg.share_types).unwrap_or_else(|_| "[]".into());
     let _ = db::update_setting(&conn, "lan_share_types", &types_json);
     let _ = db::update_setting(&conn, "lan_listen_port", &cfg.listen_port.to_string());
+    // 本机设备 ID 必须持久化：它是 mDNS 指纹、对端识别与连接角色判定的稳定依据，
+    // 一旦随每次启动随机变化，会导致对端缓存失效、连接/识别类 BUG（详见代码评审）。
+    let _ = db::update_setting(&conn, "lan_device_id", &cfg.device_id);
 }
 
 /// 从设置表载入已保存的局域网共享配置；无记录或解密失败时保留传入默认值。
@@ -187,6 +190,15 @@ fn load_persisted_config(db: &DbState, cfg: &mut LanConfig) {
     let saved = db::get_int_setting(&conn, "lan_listen_port", LAN_PORT as i64) as u16;
     if (1..=65535).contains(&saved) {
         cfg.listen_port = saved;
+    }
+    // 本机设备 ID：持久化保证跨启动稳定。无记录（首次启动）时生成一次并立即写回，
+    // 之后始终复用，避免因 device_id 每次随机变化引发的连接/识别类 BUG。
+    let saved_id = db::get_string_setting(&conn, "lan_device_id", "");
+    if saved_id.is_empty() {
+        cfg.device_id = Uuid::new_v4().to_string();
+        let _ = db::update_setting(&conn, "lan_device_id", &cfg.device_id);
+    } else {
+        cfg.device_id = saved_id;
     }
 }
 
@@ -235,6 +247,18 @@ struct Inner {
     known_peers: HashMap<String, SocketAddr>,
     /// 已知对端名称（device_id -> 友好名），来源 mDNS TXT 或握手 hello，用于共享列表展示。
     peer_names: HashMap<String, String>,
+    /// 网络栈代际计数：每次 start()（含 stop+start 重启）递增，stop() 也会递增。连接的读任务在
+    /// spawn 时捕获自己的代际；读任务在 register_conn（把对端插入 conns）前检查代际是否仍有效，
+    /// 失效则跳过登记——从而避免 stop 清空 conns 后、协作式取消的读任务又把对端插回、污染
+    /// 前端 refreshPeers 读到的「在线设备」列表。
+    gen: u64,
+    /// 每条已建连接读任务的中止句柄（device_id -> AbortHandle）。
+    /// 关闭共享时必须主动 abort 这些读任务，才能真正关闭底层 socket（发 FIN），
+    /// 否则读任务仍存活、持续回 Pong，对端心跳永不超时，设备永远不从列表移除（僵尸连接）。
+    conn_aborts: HashMap<String, tokio::task::AbortHandle>,
+    /// 已知对端的 mDNS 全名（device_id -> fullname），用于 ServiceRemoved 精确匹配。
+    /// 因 mDNS fullname 取自已方设备名而非 device_id(UUID)，不能靠 contains(device_id) 匹配。
+    peer_fullnames: HashMap<String, String>,
     mdns: Option<ServiceDaemon>,
     /// 数据库句柄（写入对端共享条目）。
     db: DbState,
@@ -268,6 +292,9 @@ impl LanManager {
                 client_stops: HashMap::new(),
                 known_peers: HashMap::new(),
                 peer_names: HashMap::new(),
+                conn_aborts: HashMap::new(),
+                gen: 0,
+                peer_fullnames: HashMap::new(),
                 mdns: None,
                 db,
                 server_task: None,
@@ -283,6 +310,8 @@ impl LanManager {
         // 设置回环检测用的本机 device_id。
         let dev_id = inner.config.device_id.clone();
         inner.store.set_self_device(dev_id);
+        // 新网络栈代际：使上一轮遗留的连接读任务失效（它们会在 register_conn 前因 gen 不匹配而跳过）。
+        inner.gen = inner.gen.wrapping_add(1);
         // 未开启共享：不注册 mDNS / 不监听，避免未共享时被同网发现，
         // 也确保关闭共享后本机从对端「在线设备」列表消失（而非残留 / 重复）。
         if !inner.config.share_out {
@@ -459,10 +488,14 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let (server_handle, removed) = {
+        let (server_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
             let removed: Vec<String> = inner.conns.keys().cloned().collect();
+            // 代际失效：使所有旧连接读任务失效。它们随后在 register_conn 前检查 gen 不匹配，
+            // 不再把对端插回 conns，从而消除「stop 清空 conns 后读任务又把设备加回」的竞态
+            // （前端 refreshPeers 整体覆盖 peers，读到脏 conns 会让「在线设备」面板残留已断开设备）。
+            inner.gen = inner.gen.wrapping_add(1);
             if let Some(mdns) = inner.mdns.take() {
                 let _ = mdns.shutdown();
             }
@@ -470,19 +503,32 @@ impl LanManager {
                 stop.store(true, Ordering::SeqCst);
             }
             inner.client_stops.clear();
+            // 收集所有对端连接读任务的中止句柄：释放锁后再 abort，才能真正关闭底层
+            // socket（发 FIN），使对端立即检测到断线并 remove_conn，从「在线设备」列表移除本机。
+            // 仅靠 drop `tx`（写半边）不够：读任务仍存活、持读半边并自动回 Pong，
+            // 连接会变成僵尸，对端心跳永不超时。
+            let aborts: Vec<tokio::task::AbortHandle> =
+                inner.conn_aborts.values().cloned().collect();
             inner.conns.clear();
+            inner.conn_aborts.clear();
             inner.known_peers.clear();
+            inner.peer_fullnames.clear();
             // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
             // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
             // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
             // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
-            (inner.server_task.take(), removed)
+            (inner.server_task.take(), removed, aborts)
         };
         // 中止 TCP 监听任务并等待其退出，确保监听端口被释放，
         // 否则 set_config 重启时发现（start）会因旧监听仍占用端口而误报「端口被占用」。
         if let Some(h) = server_handle {
             h.abort();
             let _ = h.await;
+        }
+        // 主动中止所有对端连接读任务：底层 socket 关闭（FIN），对端 read.next() 立即返回 None
+        // -> remove_conn -> 广播 lan-peer-offline，本机从对方「在线设备」列表消失。
+        for a in aborts {
+            a.abort();
         }
         // 仅当共享确实关闭时广播离线：配置热更新（共享仍开）会立即重连，
         // 不广播离线可避免「在线设备」列表闪烁。
@@ -720,6 +766,9 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
                 }
                 // 记录对端友好名（供共享列表展示），优先于握手 hello。
                 g.peer_names.insert(device_id.clone(), name.clone());
+                // 记录 mDNS 全名，供 ServiceRemoved 精确匹配（fullname 取自设备名，不含 device_id）。
+                g.peer_fullnames
+                    .insert(device_id.clone(), info.get_fullname().to_string());
             }
             // 取对端地址（优先非回环；无则取首个）。
             let addr = {
@@ -751,26 +800,45 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
             spawn_client_retry(addr, inner, app, Some(device_id)).await;
         }
         ServiceEvent::ServiceRemoved(fullname, _) => {
-            // 找不到 device_id（fullname 是实例名），按已知对端名匹配停止。
-            let mut g = inner.lock().await;
-            let target = g
-                .known_peers
-                .iter()
-                .find(|(id, _)| fullname.contains(id.as_str()))
-                .map(|(id, _)| id.clone());
-            if let Some(id) = target {
-                if let Some(stop) = g.client_stops.remove(&id) {
-                    stop.store(true, Ordering::SeqCst);
+            // mDNS 全名取自已方设备名（实例名），不含 device_id(UUID)，无法用 contains 匹配；
+            // 改用 ServiceResolved 时记录的 peer_fullnames 做精确匹配。
+            let (id, abort, was) = {
+                let mut g = inner.lock().await;
+                let target = g
+                    .peer_fullnames
+                    .iter()
+                    .find(|(_, fn_)| fn_.as_str() == fullname.as_str())
+                    .map(|(id, _)| id.clone());
+                match target {
+                    Some(id) => {
+                        if let Some(stop) = g.client_stops.remove(&id) {
+                            stop.store(true, Ordering::SeqCst);
+                        }
+                        g.known_peers.remove(&id);
+                        g.peer_names.remove(&id);
+                        g.peer_fullnames.remove(&id);
+                        let abort = g.conn_aborts.remove(&id);
+                        let was = g.conns.remove(&id).is_some();
+                        (Some(id), abort, was)
+                    }
+                    None => (None, None, false),
                 }
-                g.known_peers.remove(&id);
-                g.peer_names.remove(&id);
-                g.conns.remove(&id);
-                let _ = app.emit("lan-peer-offline", PeerInfo {
-                    device_id: id,
-                    name: String::new(),
-                    addr: String::new(),
-                    connected: false,
-                });
+            };
+            // 主动中止该对端连接读任务，真正关闭 socket（FIN），使对端检测到本端移除；
+            // 仅从 conns 移除而不关 socket 会留下僵尸连接（对端仍收 Pong，列表清不掉）。
+            if let Some(abort) = abort {
+                abort.abort();
+            }
+            if let (Some(id), true) = (id, was) {
+                let _ = app.emit(
+                    "lan-peer-offline",
+                    PeerInfo {
+                        device_id: id,
+                        name: String::new(),
+                        addr: String::new(),
+                        connected: false,
+                    },
+                );
             }
         }
         _ => {}
@@ -852,6 +920,9 @@ where
     let inner_r = inner.clone();
     let app_r = app.clone();
     let tx_r = tx.clone();
+    // 本连接所属网络栈代际：stop()/start() 会递增 gen 使旧连接失效。读任务在 register_conn 前
+    // 检查 gen 不匹配则跳过登记，避免把对端重新插回 conns（前端 refreshPeers 读到脏列表会残留设备）。
+    let my_gen = { let g = inner.lock().await; g.gen };
 
     // 连接建立即处理「在线」：
     // - 客户端侧已知对端 device_id（来自 mDNS），立即登记，无需等首条剪贴板信封；
@@ -862,7 +933,7 @@ where
         (g.config.device_id.clone(), g.config.device_name.clone())
     };
     if let Some(id) = &peer_id {
-        register_conn(&inner, &app, id, tx_r.clone()).await;
+        register_conn(&inner, &app, id, tx_r.clone(), my_gen).await;
     }
     let hello = serde_json::json!({
         "type": "hello",
@@ -871,7 +942,15 @@ where
     })
     .to_string();
     let _ = tx.send(Message::Text(hello.into()));
-    let read_task = tauri::async_runtime::spawn(async move {
+    // 中止句柄槽：spawn 后取得 read_task 的 abort_handle 写入槽，供读循环在「学到对端 id」时
+    // 登记进 Inner.conn_aborts，使 stop() 能主动中止本连接读任务、真正关闭底层 socket（发 FIN），
+    // 对端随即检测到断线并 remove_conn。否则仅 drop 写半边会让连接变僵尸、对端心跳永不超时。
+    let abort_slot: Arc<std::sync::Mutex<Option<tokio::task::AbortHandle>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let slot_for_task = abort_slot.clone();
+    let peer_id_for_outside = peer_id.clone();
+    let read_task = tokio::task::spawn(async move {
+        let abort_slot = slot_for_task;
         let mut learned_id: Option<String> = peer_id.clone();
         // 心跳保活：每 15s 发送一次 Ping，对端自动回 Pong；若 45s 内无任何消息
         // （含 Pong），视为对端已断线（断电 / 断网等静默断开），主动关闭连接，
@@ -917,7 +996,13 @@ where
                                         let mut g = inner_r.lock().await;
                                         g.peer_names.entry(rid.to_string()).or_insert(nm.clone());
                                     }
-                                    register_conn(&inner_r, &app_r, rid, tx_r.clone()).await;
+                                    register_conn(&inner_r, &app_r, rid, tx_r.clone(), my_gen).await;
+                                    // 服务端侧此时才学到对端 id：登记中止句柄，使 stop() 能断开本连接。
+                                    let handle_opt = abort_slot.lock().unwrap().clone();
+                                    if let Some(h) = handle_opt {
+                                        let mut g = inner_r.lock().await;
+                                        g.conn_aborts.insert(rid.to_string(), h);
+                                    }
                                 } else {
                                     update_peer_name(&inner_r, &app_r, rid, &nm).await;
                                 }
@@ -973,7 +1058,13 @@ where
                     // 首个信封获知对端 id（服务端侧）。
                     if learned_id.is_none() {
                         learned_id = Some(rid.clone());
-                        register_conn(&inner_r, &app_r, &rid, tx_r.clone()).await;
+                        register_conn(&inner_r, &app_r, &rid, tx_r.clone(), my_gen).await;
+                        // 服务端侧此时才学到对端 id：登记中止句柄，使 stop() 能断开本连接。
+                        let handle_opt = abort_slot.lock().unwrap().clone();
+                        if let Some(h) = handle_opt {
+                            let mut g = inner_r.lock().await;
+                            g.conn_aborts.insert(rid, h);
+                        }
                     }
                     // 按本端「共享类型」白名单过滤：未勾选的类型不入库（在线列表不受影响）。
                     let allowed = {
@@ -1256,6 +1347,13 @@ where
         }
     });
 
+    // 取得读任务中止句柄：客户端侧（peer_id 已知）立即登记；服务端侧待握手/首条信封学到
+    // 对端 id 后再从 abort_slot 取出登记（见读循环内两处 learned 分支）。
+    let read_abort = read_task.abort_handle();
+    *abort_slot.lock().unwrap() = Some(read_abort.clone());
+    if let Some(id) = &peer_id_for_outside {
+        inner.lock().await.conn_aborts.insert(id.clone(), read_abort);
+    }
     // 等读任务结束即视为连接终止；取消写任务。
     let _ = read_task.await;
     write_task.abort();
@@ -1270,9 +1368,16 @@ async fn register_conn(
     app: &AppHandle,
     device_id: &str,
     tx: mpsc::UnboundedSender<Message>,
+    my_gen: u64,
 ) {
     let (is_new, resolved) = {
         let mut g = inner.lock().await;
+        // 代际守卫：stop()/start() 已使本连接失效（gen 已递增），跳过登记。
+        // 否则协作式取消的读任务会在 stop 清空 conns 后再次把对端插回，前端 refreshPeers
+        // 读到脏列表会让「在线设备」面板残留已断开设备。
+        if g.gen != my_gen {
+            return;
+        }
         let resolved = g
             .peer_names
             .get(device_id)
@@ -1340,6 +1445,8 @@ async fn remove_conn(inner: &Arc<Mutex<Inner>>, app: &AppHandle, device_id: &str
         let mut g = inner.lock().await;
         g.conns.remove(device_id).is_some()
     };
+    // 同步清理中止句柄，避免泄漏（stop() 已统一 abort 并清空，此处兜底常态断线场景）。
+    inner.lock().await.conn_aborts.remove(device_id);
     if existed {
         let _ = app.emit(
             "lan-peer-offline",
@@ -1872,6 +1979,12 @@ mod tests {
         assert_eq!(reloaded.file_limit_mb, 50);
         assert_eq!(reloaded.manual_peers, vec!["192.168.1.5:21995".to_string()]);
         assert_eq!(reloaded.listen_port, 21996);
+        // 设备 ID 必须持久化并在重载后保持一致，否则跨启动随机变化会破坏对端识别与连接。
+        assert_eq!(reloaded.device_id, cfg.device_id);
+        // 再次重载（模拟再次启动）仍应保持同一 ID，不会重新生成。
+        let mut reload2 = LanConfig::default();
+        load_persisted_config(&db, &mut reload2);
+        assert_eq!(reload2.device_id, cfg.device_id);
     }
 
     #[test]
