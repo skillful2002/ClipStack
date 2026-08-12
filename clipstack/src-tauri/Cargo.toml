@@ -1,6 +1,6 @@
 [package]
 name = "clipstack"
-version = "0.2.0-lan"
+version = "0.2.0"
 description = "ClipStack 跨平台剪切板管理器"
 authors = ["ClipStack"]
 edition = "2021"

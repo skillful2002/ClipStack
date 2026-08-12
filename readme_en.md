@@ -5,7 +5,7 @@
 ClipStack is a **cross-platform clipboard manager** that lives in your menu bar / system tray and runs quietly in the background. It supports **macOS** and **Windows**. It captures everything you copy — text, links, code, images, and files — in real time, and gives you full-text search, smart categorization, and one-click reuse, so your clipboard becomes **searchable, browsable, and reusable**.
 
 - App identifier: `tech.newxin-clipstack.app`
-- Current version: `0.2.0-lan`
+- Current version: `0.2.0`
 - Stack: Tauri 2 + React 18 + TypeScript + Vite + Rust (SQLite persistence)
 
 ---
