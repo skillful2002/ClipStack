@@ -277,7 +277,7 @@ export const lanShareFolderPath = (): Promise<string> =>
 export const lanOpenShareFolder = (): Promise<void> =>
   invoke<void>("lan_open_share_folder");
 
-/** 清空共享文件夹，返回删除的文件数。 */
+/** 清空共享文件夹（移至回收站），返回移动的文件数。 */
 export const lanClearShareFiles = (): Promise<number> =>
   invoke<number>("lan_clear_share_files");
 

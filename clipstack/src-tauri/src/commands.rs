@@ -1176,7 +1176,7 @@ pub async fn lan_open_share_folder(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// 清空共享文件夹（~/.clipstack/share）内的全部文件与子目录，返回删除的文件数。
+/// 清空共享文件夹（~/.clipstack/share）内的全部文件与子目录，将它们移至系统回收站，返回移动的文件数。
 #[tauri::command]
 pub async fn lan_clear_share_files(app: AppHandle) -> Result<u64, String> {
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -1190,33 +1190,30 @@ pub async fn lan_clear_share_files(app: AppHandle) -> Result<u64, String> {
         let p = entry.path();
         if let Ok(meta) = p.metadata() {
             if meta.is_file() {
-                if std::fs::remove_file(&p).is_ok() {
+                if trash::delete(&p).is_ok() {
                     removed += 1;
                 }
             } else if meta.is_dir() {
-                // 递归删除整目录并累加其中文件数。
-                removed += remove_dir_all_count(&p);
-                let _ = std::fs::remove_dir(&p);
+                // 先统计目录内文件数，再将整个目录移至回收站。
+                removed += count_files(&p);
+                let _ = trash::delete(&p);
             }
         }
     }
     Ok(removed)
 }
 
-/// 递归删除目录并返回删除的文件数（尽力而为，不要求每个文件都成功）。
-fn remove_dir_all_count(dir: &std::path::Path) -> u64 {
+/// 递归统计目录内的文件数（不执行删除）。
+fn count_files(dir: &std::path::Path) -> u64 {
     let mut count: u64 = 0;
     if let Ok(mut stack) = std::fs::read_dir(dir) {
         while let Some(Ok(entry)) = stack.next() {
             let p = entry.path();
             if let Ok(meta) = p.metadata() {
                 if meta.is_file() {
-                    if std::fs::remove_file(&p).is_ok() {
-                        count += 1;
-                    }
+                    count += 1;
                 } else if meta.is_dir() {
-                    count += remove_dir_all_count(&p);
-                    let _ = std::fs::remove_dir(&p);
+                    count += count_files(&p);
                 }
             }
         }

@@ -32,6 +32,7 @@ tauri-plugin-autostart = "2"        # P6 开机自启开关
 tauri-plugin-dialog = "2"           # 另存为：系统文件 / 目录选择对话框
 tauri-plugin-opener = "2"           # 打开系统默认浏览器（关于页「打开下载页」）
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }  # 后台静默检查 Gitee 新版本
+trash = "5"                        # 跨平台移动文件/目录到系统回收站（清空共享文件夹时使用）
 
 # ===== 局域网共享（L2/L3，见 clipstack-lan-sync-design.md）=====
 clipstack-protocol = { path = "../../clipstack-protocol" }  # 共享协议库
