@@ -156,6 +156,12 @@ export function LanSettings() {
     if (!ok) setShareOut(!next);
   };
 
+  // 组 / 密钥 / 端口 / 手动对端 仅在失焦时落库：避免每次按键都触发 set_config（会重启 mDNS 带来连接抖动）。
+  // 失焦发生在切走设置页之前，因此可覆盖「改完直接换页未保存」的场景。
+  const onFieldBlur = () => {
+    void applyConfig(undefined, true);
+  };
+
   const onTest = async () => {
     setTesting(true);
     try {
@@ -250,6 +256,7 @@ export function LanSettings() {
             value={group}
             disabled={shareOut}
             onChange={(e) => setGroup(e.target.value)}
+            onBlur={onFieldBlur}
           />
         </div>
 
@@ -263,6 +270,7 @@ export function LanSettings() {
               value={key}
               disabled={shareOut}
               onChange={(e) => setKey(e.target.value)}
+              onBlur={onFieldBlur}
             />
             <button
               type="button"
@@ -311,6 +319,7 @@ export function LanSettings() {
               setListenPort(Number(e.target.value));
               setPortError("");
             }}
+            onBlur={onFieldBlur}
           />
         </div>
         <p className="settings-hint">{t("lan.listenPortHint", { port })}</p>
@@ -338,6 +347,7 @@ export function LanSettings() {
             value={manualPeers}
             disabled={shareOut}
             onChange={(e) => setManualPeers(e.target.value)}
+            onBlur={onFieldBlur}
           />
           <p className="settings-hint">{t("lan.manualPeersHint", { port })}</p>
         </div>
