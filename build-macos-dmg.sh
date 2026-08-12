@@ -8,19 +8,21 @@
 # 本脚本用 hdiutil 直接生成一份功能完整、可本地安装的 .dmg（含“拖到 Applications”快捷方式），
 # 绕过 create-dmg 的 AppleScript 步骤，避免上述环境问题。
 #
-# 用法：
-#   bash scripts/build-macos-dmg.sh                  # 默认构建本机架构（Apple Silicon）
-#   bash scripts/build-macos-dmg.sh x86_64-apple-darwin   # 仅 Intel 包（产物名 ..._x64.dmg）
-#   bash scripts/build-macos-dmg.sh universal-apple-darwin # 通用二进制（..._universal.dmg）
+# 用法（从仓库根目录执行）：
+#   bash build-macos-dmg.sh                  # 默认构建本机实际架构（Apple Silicon / Intel，取决于当前机器）
+#   bash build-macos-dmg.sh x86_64-apple-darwin   # 仅 Intel 包（产物名 ..._x64.dmg）
+#   bash build-macos-dmg.sh universal-apple-darwin # 通用二进制（..._universal.dmg）
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 脚本置于仓库根目录，真正的 Tauri 工程在 clipstack/ 子目录
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/clipstack" && pwd)"
 cd "$ROOT"
 
 PRODUCT_NAME="ClipStack"
 APP_BIN="clipstack"          # .app 内可执行文件名（cargo bin name）
-VERSION="0.1.2"
+# 版本号动态读取自 tauri.conf.json，避免与项目实际版本脱节
+VERSION="$(node -p "require('./src-tauri/tauri.conf.json').package.version" 2>/dev/null || echo "0.0.0")"
 
 # 目标架构：默认本机 host triple
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
@@ -51,9 +53,26 @@ echo "==> 目标架构: ${TARGET}  (产物: ${PRODUCT_NAME}_${VERSION}_${SUFFIX}
 # 1) 执行 tauri build。在无法控制 Finder 的环境里，dmg 步骤会失败，但 .app 已先于该步骤产出，
 #    因此这里允许其非零退出，随后用 hdiutil 自行打包。
 echo "==> 构建应用（tauri build --target ${TARGET}）..."
-npm run tauri -- build --target "${TARGET}" || echo "注意：tauri build 在 dmg 步骤返回非零（通常是 create-dmg 的 AppleScript 环境问题），继续手动打包 .dmg。"
+# 先清理旧的 .app，避免基于陈旧产物打包造成“假成功”
+rm -rf "$APP_DIR"
+if ! npm run tauri -- build --target "${TARGET}"; then
+  if [[ -d "$APP_DIR" ]]; then
+    echo "注意：tauri build 在 dmg 步骤返回非零（通常是 create-dmg 的 AppleScript 环境问题），继续手动打包 .dmg。"
+  else
+    echo "错误：tauri build 在生成 .app 之前就失败了（非 dmg 步骤问题），请检查上面的构建日志。" >&2
+    exit 1
+  fi
+fi
 
 # 2) 校验 .app 是否产出
+if [[ "$TARGET" == "universal-apple-darwin" ]]; then
+  for t in aarch64-apple-darwin x86_64-apple-darwin; do
+    if ! rustup target list --installed 2>/dev/null | grep -q "^$t$"; then
+      echo "错误：universal 构建需要先安装 rust target: $t (rustup target add $t)" >&2
+      exit 1
+    fi
+  done
+fi
 if [[ ! -d "$APP_DIR" ]]; then
   echo "错误：未找到已构建的 ${APP_DIR}，请检查上面的构建日志。" >&2
   exit 1
@@ -70,6 +89,8 @@ fi
 # 4) 准备 dmg 内容：App + Applications 快捷方式
 echo "==> 准备 dmg 内容..."
 cp -R "$APP_DIR" "$STAGE/"
+# 清理可能的 .DS_Store / 资源分支，避免污染最终 dmg
+find "$STAGE" -name '.DS_Store' -delete 2>/dev/null || true
 ln -s /Applications "$STAGE/Applications"
 
 # 5) 生成 dmg
