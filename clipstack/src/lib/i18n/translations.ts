@@ -230,6 +230,9 @@ const zhCN: Dict = {
   "about.platform": "操作系统",
   "about.arch": "处理器架构",
   "about.back": "返回主界面",
+  "about.newVersion": "发现新版本 {version}",
+  "about.openDownload": "打开下载页",
+  "about.newVersionBadge": "有新版本可用",
 
   "toast.copied": "已复制到剪贴板",
   "toast.saved": "已保存到本地",
@@ -542,6 +545,9 @@ const zhTW: Dict = {
   "about.platform": "作業系統",
   "about.arch": "處理器架構",
   "about.back": "返回主介面",
+  "about.newVersion": "發現新版本 {version}",
+  "about.openDownload": "打開下載頁",
+  "about.newVersionBadge": "有新版本可用",
 
   "toast.copied": "已複製到剪貼簿",
   "toast.saved": "已儲存到本機",
@@ -854,6 +860,9 @@ const en: Dict = {
   "about.platform": "Operating System",
   "about.arch": "Architecture",
   "about.back": "Back to Main",
+  "about.newVersion": "New version {version} available",
+  "about.openDownload": "Open download page",
+  "about.newVersionBadge": "New version available",
 
   "toast.copied": "Copied to clipboard",
   "toast.saved": "Saved to local file",
@@ -1166,6 +1175,9 @@ const ja: Dict = {
   "about.platform": "OS",
   "about.arch": "アーキテクチャ",
   "about.back": "メインに戻る",
+  "about.newVersion": "新しいバージョン {version} が利用可能",
+  "about.openDownload": "ダウンロードページを開く",
+  "about.newVersionBadge": "新しいバージョンが利用可能",
 
   "toast.copied": "クリップボードにコピーしました",
   "toast.saved": "ローカルに保存しました",
@@ -1478,6 +1490,9 @@ const de: Dict = {
   "about.platform": "Betriebssystem",
   "about.arch": "Architektur",
   "about.back": "Zurück zum Hauptfenster",
+  "about.newVersion": "Neue Version {version} verfügbar",
+  "about.openDownload": "Downloadseite öffnen",
+  "about.newVersionBadge": "Neue Version verfügbar",
 
   "toast.copied": "In die Zwischenablage kopiert",
   "toast.saved": "Lokal gespeichert",
@@ -1790,6 +1805,9 @@ const fr: Dict = {
   "about.platform": "Système d'exploitation",
   "about.arch": "Architecture",
   "about.back": "Retour à la fenêtre principale",
+  "about.newVersion": "Nouvelle version {version} disponible",
+  "about.openDownload": "Ouvrir la page de téléchargement",
+  "about.newVersionBadge": "Nouvelle version disponible",
 
   "toast.copied": "Copié dans le presse-papiers",
   "toast.saved": "Enregistré localement",

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { useHistory, type Category } from "./store/history";
 import {
   onClipboardChanged,
@@ -18,6 +19,7 @@ import {
   parseLanPrereqError,
   lanPrereqToastMessage,
   touchActivity,
+  checkUpdate,
 } from "./lib/tauri";
 import { useItemActions } from "./lib/actions";
 import { applyTheme, watchSystemTheme, type Theme } from "./lib/theme";
@@ -107,6 +109,25 @@ export default function App() {
       themeUnlistenRef.current();
     };
   }, [load, prepend]);
+
+  // 日常开发：后台静默检查 Gitee 是否有新版本，结果写入 store 供侧边栏角标与关于页使用。
+  // 网络异常 / 限流时静默忽略，绝不影响主流程。
+  useEffect(() => {
+    void (async () => {
+      try {
+        const current = await getVersion();
+        const info = await checkUpdate(current);
+        if (import.meta.env.DEV) {
+          console.log("[check_update]", info);
+        }
+        useHistory.getState().setUpdateInfo(info);
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn("[check_update] failed:", e);
+        }
+      }
+    })();
+  }, []);
 
   // P4：托盘菜单 / 全局快捷键触发的视图切换与复制回执。
   useEffect(() => {

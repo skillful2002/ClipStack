@@ -129,6 +129,22 @@ export interface SystemInfo {
 export const getSystemInfo = (): Promise<SystemInfo> =>
   invoke<SystemInfo>("get_system_info");
 
+/** 更新检查：Gitee 后台静默检查得到的版本信息。 */
+export interface UpdateCheck {
+  /** 是否存在新版本（latest > current）。 */
+  hasUpdate: boolean;
+  /** 当前安装版本（与「关于系统」展示一致）。 */
+  currentVersion: string;
+  /** 远端最新版本号（已去除前缀 v）。 */
+  latestVersion: string;
+  /** 下载页地址（点击后用系统默认浏览器打开）。 */
+  releaseUrl: string;
+}
+
+/** 后台静默检查 Gitee 是否有新版本；currentVersion 取自身版本（tauri.conf.json）。 */
+export const checkUpdate = (currentVersion: string): Promise<UpdateCheck> =>
+  invoke<UpdateCheck>("check_update", { currentVersion });
+
 /** 首次运行判定：窗口显示与标记写入已在启动阶段同步完成；此处仅读取标志，供前端决定是否进入设置页。 */
 export const wasFirstRun = (): Promise<boolean> =>
   invoke<boolean>("was_first_run");

@@ -489,6 +489,136 @@ pub fn get_system_info() -> SystemInfo {
     SystemInfo { platform, arch }
 }
 
+/// 关于系统 / 更新检查：后台静默访问 Gitee 最新发布，返回是否需要更新及最新版本。
+/// 网络异常、限流或解析失败时一律「无更新」静默返回，不向上抛错（避免阻塞界面）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    /// 是否存在新版本（latest > current）。
+    pub has_update: bool,
+    /// 当前安装版本（由前端传入，与「关于系统」展示的版本一致）。
+    pub current_version: String,
+    /// 远端最新版本号（已去除前缀 v）。
+    pub latest_version: String,
+    /// 下载页地址（点击后用系统默认浏览器打开）。
+    pub release_url: String,
+}
+
+/// 将 "1.2.3" / "v1.2.3" / "1.2.3-beta" 解析为数字段；无法解析返回 None。
+fn parse_version(v: &str) -> Option<Vec<u64>> {
+    let mut nums = Vec::new();
+    for part in v.split('.') {
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            return None;
+        }
+        nums.push(digits.parse().ok()?);
+    }
+    Some(nums)
+}
+
+/// 判断 latest 是否严格晚于 current（按语义化版本逐段比较）。
+fn is_newer(latest: &str, current: &str) -> bool {
+    match (parse_version(latest), parse_version(current)) {
+        (Some(l), Some(c)) => {
+            for (a, b) in l.iter().zip(c.iter()) {
+                if a > b {
+                    return true;
+                }
+                if a < b {
+                    return false;
+                }
+            }
+            l.len() > c.len()
+        }
+        _ => false,
+    }
+}
+
+/// 取 Gitee 最新「发布」的 tag（releases/latest 是按发布而非 tag 排序，最权威）。
+/// 成功返回 Some(tag)；失败（网络/限流/解析）返回 None（调用方静默视为无更新）。
+/// 注意：不要用 tags 接口兜底——tags 按创建时间排序，新推的低版本 tag 会排在最前，
+/// 反而给出比当前更低的版本、掩盖真实更新。
+async fn fetch_latest_tag(client: &reqwest::Client) -> Option<String> {
+    let latest_api = "https://gitee.com/api/v5/repos/liuzhengguo/ClipStack/releases/latest";
+    match client.get(latest_api).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if !status.is_success() {
+                eprintln!("[clipstack] check_update: releases/latest HTTP {status}");
+                return None;
+            }
+            match resp.json::<serde_json::Value>().await {
+                Ok(json) => {
+                    let tag = json
+                        .get("tag_name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim_start_matches('v').to_string())
+                        .unwrap_or_default();
+                    if tag.is_empty() {
+                        eprintln!("[clipstack] check_update: releases/latest 无 tag_name 字段");
+                        return None;
+                    }
+                    eprintln!("[clipstack] check_update: releases/latest tag = {tag}");
+                    Some(tag)
+                }
+                Err(e) => {
+                    eprintln!("[clipstack] check_update: 解析 JSON 失败: {e}");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[clipstack] check_update: 请求失败: {e}");
+            None
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn check_update(current_version: String) -> UpdateInfo {
+    let release_url = "https://gitee.com/liuzhengguo/ClipStack/releases".to_string();
+    let fallback = UpdateInfo {
+        has_update: false,
+        current_version: current_version.clone(),
+        latest_version: String::new(),
+        release_url: release_url.clone(),
+    };
+
+    eprintln!("[clipstack] check_update: current_version = {current_version}");
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .user_agent("ClipStack")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[clipstack] check_update: client build error: {e}");
+            return fallback;
+        }
+    };
+
+    let tag = match fetch_latest_tag(&client).await {
+        Some(t) => t,
+        None => {
+            eprintln!("[clipstack] check_update: 无法获取最新版本（网络/限流/解析失败），静默视为无更新");
+            return fallback;
+        }
+    };
+
+    let has = is_newer(&tag, &current_version);
+    eprintln!(
+        "[clipstack] check_update: 比较 latest={tag} current={current_version} => has_update={has}"
+    );
+    UpdateInfo {
+        has_update: has,
+        current_version,
+        latest_version: tag,
+        release_url,
+    }
+}
+
 /// 读取启动阶段写入的「是否首次运行」标志。
 /// 首次运行的窗口显示与标记写入已在 `setup` 阶段同步完成；前端据此决定是否自动进入设置页。
 #[tauri::command]

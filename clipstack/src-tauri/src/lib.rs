@@ -114,6 +114,7 @@ pub fn run() {
             Some(vec![]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(monitor_state.clone())
         .setup(move |app| {
             // 打开（或创建）SQLite 数据库。
@@ -411,6 +412,7 @@ pub fn run() {
             commands::get_item_blob,
             commands::get_trash_blob,
             commands::get_system_info,
+            commands::check_update,
             commands::copy_image,
             commands::copy_file,
             commands::save_item_as,

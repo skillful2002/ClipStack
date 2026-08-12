@@ -114,6 +114,15 @@
   color: var(--cs-text-tertiary);
 }
 
+/* 侧边栏「关于系统」后的新版本小角标（小圆点，靠右）。 */
+.nav-badge {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cs-accent);
+}
+
 /* 侧边栏导航项后的快捷键提示（靠右、弱化、等宽数字）。 */
 .nav-shortcut {
   flex-shrink: 0;
@@ -929,6 +938,42 @@
 
 .about-back:hover {
   border-color: var(--cs-accent, var(--cs-border));
+}
+
+/* 关于系统：发现新版本时的提示区（「应用版本」下方）。 */
+.about-update {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--cs-accent, var(--cs-border));
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-accent-soft, var(--cs-bg-subtle));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-update-row {
+  font-size: 13px;
+  color: var(--cs-text-primary);
+}
+
+.about-update-label {
+  font-weight: 600;
+}
+
+.about-update-link {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.about-update-link:hover {
+  filter: brightness(1.08);
 }
 
 /* 帮助视图 */

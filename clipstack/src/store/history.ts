@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import type { ContentType, HistoryItem } from "../types";
 import * as api from "../lib/tauri";
+import type { UpdateCheck } from "../lib/tauri";
 
 /** 侧边栏分类：全部 + 五种内容类型。 */
 export type Category = ContentType | "all";
@@ -25,6 +26,11 @@ interface HistoryState {
   error: string | null;
   /** 轻量提示（复制成功 / 错误等），由 App 渲染并在数秒后清除。 */
   toast: string | null;
+
+  /** 后台静默检查 Gitee 得到的新版本信息；null 表示尚未检查完成。 */
+  updateInfo: UpdateCheck | null;
+  /** 写入新版本检查结果。 */
+  setUpdateInfo: (info: UpdateCheck | null) => void;
 
   /** 回收站条目（与主页 items 隔离，避免 id 冲突）。 */
   trashItems: HistoryItem[];
@@ -70,6 +76,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   loading: false,
   error: null,
   toast: null,
+  updateInfo: null,
   trashItems: [],
   selectedTrashId: null,
 
@@ -147,6 +154,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   setSearch: (search) => set({ search }),
   setView: (view) => set({ view }),
   setToast: (toast) => set({ toast }),
+  setUpdateInfo: (updateInfo) => set({ updateInfo }),
 
   prepend: (item) => {
     const exists = get().items.some((i) => i.id === item.id);

@@ -35,6 +35,7 @@ export function Sidebar() {
   const setSearch = useHistory((s) => s.setSearch);
   const view = useHistory((s) => s.view);
   const setView = useHistory((s) => s.setView);
+  const hasUpdate = useHistory((s) => s.updateInfo?.hasUpdate ?? false);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -130,6 +131,9 @@ export function Sidebar() {
             <AboutIcon size={16} />
           </span>
           <span className="nav-label">{t("sidebar.about")}</span>
+          {hasUpdate && (
+            <span className="nav-badge" aria-label={t("about.newVersionBadge")} />
+          )}
         </button>
       </div>
     </aside>

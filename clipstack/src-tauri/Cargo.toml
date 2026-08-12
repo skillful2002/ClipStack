@@ -30,6 +30,8 @@ clipboard-win = "5"                  # 直接读 arboard 3.x 未覆盖的 CF_BIT
 tauri-plugin-global-shortcut = "2"  # P4 全局快捷键（唤起主界面）
 tauri-plugin-autostart = "2"        # P6 开机自启开关
 tauri-plugin-dialog = "2"           # 另存为：系统文件 / 目录选择对话框
+tauri-plugin-opener = "2"           # 打开系统默认浏览器（关于页「打开下载页」）
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }  # 后台静默检查 Gitee 新版本
 
 # ===== 局域网共享（L2/L3，见 clipstack-lan-sync-design.md）=====
 clipstack-protocol = { path = "../../clipstack-protocol" }  # 共享协议库

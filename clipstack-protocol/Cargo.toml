@@ -1,6 +1,6 @@
 [package]
 name = "clipstack-protocol"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "ClipStack 共享同步协议库：信封 / 去重 / Lamport 时钟 / 回环防护（纯逻辑，无 IO）"
 

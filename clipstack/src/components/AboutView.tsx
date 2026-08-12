@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getVersion, getTauriVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useT } from "../lib/i18n";
 import { useHistory } from "../store/history";
 import { getSystemInfo } from "../lib/tauri";
@@ -17,6 +18,9 @@ export function AboutView() {
   const t = useT();
   const setView = useHistory((s) => s.setView);
   const [info, setInfo] = useState<AboutInfo | null>(null);
+  const updateInfo = useHistory((s) => s.updateInfo);
+  const hasUpdate =
+    !!updateInfo?.hasUpdate && updateInfo.latestVersion.length > 0;
 
   useEffect(() => {
     void (async () => {
@@ -57,6 +61,22 @@ export function AboutView() {
             </div>
           ))}
         </div>
+
+        {hasUpdate && (
+          <div className="about-update">
+            <div className="about-update-row">
+              <span className="about-update-label">
+                {t("about.newVersion", { version: updateInfo!.latestVersion })}
+              </span>
+            </div>
+            <button
+              className="about-update-link"
+              onClick={() => void openUrl(updateInfo!.releaseUrl)}
+            >
+              {t("about.openDownload")}
+            </button>
+          </div>
+        )}
       </div>
 
       <button className="about-back" onClick={() => setView("main")}>
