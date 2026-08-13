@@ -36,6 +36,22 @@ pub const SERVICE_TYPE: &str = "_clipstack._tcp.local.";
 pub const LAN_PORT: u16 = 21995;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// 诊断日志：同时输出到 stderr 与临时文件，便于打包(release)环境下复现「卡死」时定位卡点。
+#[allow(dead_code)]
+pub(crate) fn dlog(msg: &str) {
+    use std::io::Write as _;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let line = format!("[lan][{ts}] {msg}");
+    eprintln!("{line}");
+    let path = std::env::temp_dir().join("clipstack_lan.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 /// 局域网共享配置（内存态；落库经内部密钥包装为 wrapped_key，见 L3）。
 #[derive(Clone)]
 pub struct LanConfig {
@@ -264,6 +280,8 @@ struct Inner {
     db: DbState,
     /// TCP 监听任务句柄：stop() 时中止以释放端口，避免重绑失败（见 set_config 重启）。
     server_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// mDNS 周期重宣告任务句柄：stop() 时中止，避免共享关闭后仍在重宣告本机服务。
+    reannounce_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 
 /// 局域网同步管理器（Tauri 托管状态）。
@@ -298,6 +316,7 @@ impl LanManager {
                 mdns: None,
                 db,
                 server_task: None,
+                reannounce_task: None,
             })),
             share_out_flag: Arc::new(AtomicBool::new(share_out)),
             app,
@@ -306,7 +325,9 @@ impl LanManager {
 
     /// 启动：注册 mDNS + 监听 + 浏览。幂等（重复调用安全）。
     pub async fn start(&self) {
-        let mut inner = self.inner.lock().await;
+        dlog("start() 进入");
+        let manual_peers = {
+            let mut inner = self.inner.lock().await;
         // 设置回环检测用的本机 device_id。
         let dev_id = inner.config.device_id.clone();
         inner.store.set_self_device(dev_id);
@@ -351,12 +372,17 @@ impl LanManager {
                 return;
             }
         };
+        // 克隆一份实例与守护句柄，供下方周期重宣告任务使用（避免占用 `info`/`mdns`）。
+        let info_for_reannounce = info.clone();
+        dlog("start: 即将 mDNS register");
         if let Err(e) = mdns.register(info) {
             eprintln!("[lan] mDNS 注册失败: {e}");
             return;
         }
+        dlog("start: mDNS register 完成");
 
         // 2) 浏览同服务。
+        dlog("start: 即将 mDNS browse");
         let browse_rx = match mdns.browse(SERVICE_TYPE) {
             Ok(rx) => rx,
             Err(e) => {
@@ -364,6 +390,8 @@ impl LanManager {
                 return;
             }
         };
+        dlog("start: mDNS browse 完成");
+        let mdns_daemon = mdns.clone();
         inner.mdns = Some(mdns);
 
         // 3) mDNS 事件循环。
@@ -421,17 +449,55 @@ impl LanManager {
         // 记录监听任务句柄，stop() 时中止以释放端口（否则下次 start() 重绑会误报占用）。
         inner.server_task = Some(server_handle);
 
-        // 5) 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
-        for addr in inner.config.manual_peers.clone() {
-            let resolved = addr
-                .parse::<SocketAddr>()
-                .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
-            match resolved {
-                Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
-                Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
+        // 6) 有限次重宣告：mDNS 浏览仅在「发现新实例」时触发，若对端错过本机首次宣告
+        // （如本机宣告时其对端浏览尚未就绪、或其对端缓存了同名旧实例），将长时间看不到本机。
+        // 在启动后若干时间点重新注册，迫使对端重新解析本机服务，使新上线 / 重启后的设备能在
+        // 数秒~十余秒内出现在对方在线列表。采用有限次数（而非无限循环）以避免后台常驻任务
+        // 持续占用资源 / 反复触发注册。
+        // 注意：本段仍持有 inner 守卫（需引用下方定义的 mdns_daemon / info_for_reannounce），
+        // 故置于释放守卫之前；手动 peer 循环则放在释放守卫之后（见下方说明）。
+        let inner_ra = self.inner.clone();
+        let reannounce = tauri::async_runtime::spawn(async move {
+            let delays = [
+                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(7),
+                std::time::Duration::from_secs(15),
+            ];
+            for (i, d) in delays.iter().enumerate() {
+                tokio::time::sleep(*d).await;
+                let alive = {
+                    let g = inner_ra.lock().await;
+                    g.config.share_out && g.mdns.is_some()
+                };
+                if !alive {
+                    dlog("reannounce 终止：共享已关闭");
+                    break;
+                }
+                dlog(&format!("reannounce 第 {} 次", i + 1));
+                let _ = mdns_daemon.register(info_for_reannounce.clone());
             }
+            dlog("reannounce 任务结束");
+        });
+        inner.reannounce_task = Some(reannounce);
+        // 在释放 inner 守卫前先把手动对端地址克隆出来。
+        inner.config.manual_peers.clone()
+    };
+    // 注意：手动 peer 连接任务的拉起（`spawn_client_retry` 内部会再次 lock inner 写入
+    // client_stops）必须放在释放上方 inner 守卫【之后】执行，否则 `start()` 持锁 await
+    // 又去 lock 同一 Mutex 会形成死锁，使 `set_share_out`/`set_config` 永久卡在
+    // `inner.lock()`（表现为点「共享」后状态永远不变、菜单点不动）。
+    // 5) 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
+    for addr in manual_peers {
+        let resolved = addr
+            .parse::<SocketAddr>()
+            .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
+        match resolved {
+            Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
+            Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
         }
     }
+    dlog("start() 完成");
+}
 
     /// 更新配置。
     ///
@@ -444,6 +510,12 @@ impl LanManager {
     /// 的逐字符输入）都会 `stop()` + `start()`，导致：① 正在传输的文件因连接被 tearing
     /// down 而丢失；② `peer_names` 被清空，随后收到的剪贴板来源回退为设备 ID。
     pub async fn set_config(&self, cfg: LanConfig) -> Result<(), String> {
+        eprintln!(
+            "[lan] set_config 进入 share_out={} group={} key_empty={}",
+            cfg.share_out,
+            cfg.share_group,
+            cfg.share_key.is_empty()
+        );
         // 若要开启共享，必须先配置组 / 密钥 / 端口；缺失则返回错误，且不改动任何状态。
         if cfg.share_out {
             let missing = Self::missing_share_prereqs(&cfg);
@@ -475,8 +547,11 @@ impl LanManager {
         }
         if need_restart {
             // 停掉旧的 mDNS，重新 start。
+            dlog("set_config: 即将 stop()");
             self.stop().await;
+            dlog("set_config: stop() 完成，即将 start()");
             self.start().await;
+            dlog("set_config: start() 完成");
         }
         if share_changed {
             // 共享开关变化：通知前端同步（lan-config-changed）并刷新托盘菜单的圆点 / 状态文字。
@@ -488,10 +563,17 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let (server_handle, removed, aborts) = {
+        dlog("stop() 进入");
+        let (server_handle, reannounce_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
             let removed: Vec<String> = inner.conns.keys().cloned().collect();
+            // 主动发 WebSocket Close 帧：对端读循环收到 Close 即 break 并 remove_conn，
+            // 使本机在「关闭共享」时立即从对方在线列表消失，无需等待 45s 心跳超时
+            // （否则对端会长时间显示本机「在线」却已停止同步的假在线）。
+            for conn in inner.conns.values() {
+                let _ = conn.tx.send(Message::Close(None));
+            }
             // 代际失效：使所有旧连接读任务失效。它们随后在 register_conn 前检查 gen 不匹配，
             // 不再把对端插回 conns，从而消除「stop 清空 conns 后读任务又把设备加回」的竞态
             // （前端 refreshPeers 整体覆盖 peers，读到脏 conns 会让「在线设备」面板残留已断开设备）。
@@ -516,14 +598,23 @@ impl LanManager {
             // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
             // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
             // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
-            // 取出监听任务句柄，在释放锁后再中止（避免持锁 await）。
-            (inner.server_task.take(), removed, aborts)
+            // 取出监听/重宣告任务句柄，在释放锁后再中止（避免持锁 await）。
+            (
+                inner.server_task.take(),
+                inner.reannounce_task.take(),
+                removed,
+                aborts,
+            )
         };
         // 中止 TCP 监听任务并等待其退出，确保监听端口被释放，
         // 否则 set_config 重启时发现（start）会因旧监听仍占用端口而误报「端口被占用」。
         if let Some(h) = server_handle {
             h.abort();
             let _ = h.await;
+        }
+        // 中止 mDNS 周期重宣告任务，避免共享关闭后仍在广播本机服务。
+        if let Some(h) = reannounce_handle {
+            h.abort();
         }
         // 主动中止所有对端连接读任务：底层 socket 关闭（FIN），对端 read.next() 立即返回 None
         // -> remove_conn -> 广播 lan-peer-offline，本机从对方「在线设备」列表消失。
@@ -634,6 +725,7 @@ impl LanManager {
     }
 
     pub async fn set_share_out(&self, enabled: bool) -> Result<(), String> {
+        dlog(&format!("[lan] set_share_out 进入 enabled={enabled}"));
         // 开启共享前校验前置条件：组 / 密钥 / 端口三者缺一不可，否则返回错误提示，
         // 且不改变任何状态（托盘 / 前端据此提示用户先完成配置）。
         if enabled {
@@ -647,6 +739,7 @@ impl LanManager {
         }
         let changed = {
             let mut inner = self.inner.lock().await;
+            dlog("[lan] set_share_out: 已获取 inner 锁");
             if inner.config.share_out == enabled {
                 // 已是目标状态，无需改动（也避免无谓的 stop/start）。
                 false
@@ -656,6 +749,7 @@ impl LanManager {
                 self.share_out_flag.store(enabled, Ordering::SeqCst);
                 // 仅开关变更也要持久化，否则重启后回退。
                 persist_config(&inner.db, &inner.config);
+                dlog("[lan] set_share_out: persist_config 完成");
                 true
             }
         };
@@ -793,11 +887,16 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
                 return; // 我较小或相等 -> 仅监听
             }
             // 记录已知对端并发起客户端连接（带重连）。
+            // 去重：mDNS 周期重宣告会重复触发 ServiceResolved，若已在对端表中则不重复
+            // 拉起客户端任务，避免对同一对端建立多条连接（造成在线列表重复条目）。
             {
                 let mut g = inner.lock().await;
-                g.known_peers.insert(device_id.clone(), addr);
+                if !g.known_peers.contains_key(&device_id) {
+                    g.known_peers.insert(device_id.clone(), addr);
+                    drop(g);
+                    spawn_client_retry(addr, inner, app, Some(device_id)).await;
+                }
             }
-            spawn_client_retry(addr, inner, app, Some(device_id)).await;
         }
         ServiceEvent::ServiceRemoved(fullname, _) => {
             // mDNS 全名取自已方设备名（实例名），不含 device_id(UUID)，无法用 contains 匹配；
@@ -1372,6 +1471,12 @@ async fn register_conn(
 ) {
     let (is_new, resolved) = {
         let mut g = inner.lock().await;
+        // 共享已关闭：任何连接都不得登记进「在线设备」列表。否则 stop() 清空 conns 后，
+        // 在途的 accept_peer（已捕获 stop 之后的新 gen）会再次把对端插回 conns，造成
+        // 「关闭共享后设备仍在在线列表 / 下线又复活 / 同步已停却显示在线」的假在线。
+        if !g.config.share_out {
+            return;
+        }
         // 代际守卫：stop()/start() 已使本连接失效（gen 已递增），跳过登记。
         // 否则协作式取消的读任务会在 stop 清空 conns 后再次把对端插回，前端 refreshPeers
         // 读到脏列表会让「在线设备」面板残留已断开设备。

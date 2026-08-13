@@ -2,6 +2,7 @@
 
 # WorkBuddy 工作区记忆与项目数据（非项目代码，不纳入版本控制）
 .workbuddy/
+.codebuddy/
 
 # 操作系统
 .DS_Store
