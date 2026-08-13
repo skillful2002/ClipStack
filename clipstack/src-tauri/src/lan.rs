@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -292,6 +292,9 @@ pub struct LanManager {
     /// 避免在非异步线程 `block_on(config())` 造成嵌套阻塞 / panic。
     share_out_flag: Arc<AtomicBool>,
     app: AppHandle,
+    /// 上次因 device_id 碰撞而重生 device_id 的时间戳（unix 秒），用于冷却，
+    /// 避免极端多机碰撞场景下的重生风暴。
+    collision_regen_at: Arc<AtomicU64>,
 }
 
 impl LanManager {
@@ -320,7 +323,49 @@ impl LanManager {
             })),
             share_out_flag: Arc::new(AtomicBool::new(share_out)),
             app,
+            collision_regen_at: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// 检测到对端 device_id 与本地完全相同（克隆 / 系统还原 / 复制配置所致）。
+    /// 此时两端角色判定都得到「只监听」，永远不建立连接，表现为互相完全看不到。
+    /// 处理：本机重新生成并持久化 device_id，再用新身份重启发现；两端各自独立生成
+    /// 随机 UUID，碰撞自然解开。带 30s 冷却避免重生风暴（随机 UUID 再碰撞概率近乎为 0）。
+    ///
+    /// 返回装箱 future：restart 路径会再次调用 `start()`，若直接 `async fn` 会让
+    /// `start` 的未来类型递归包含自身，触发编译器 E0391 类型循环。装箱为具体
+    /// `dyn Future` 可打断该循环。
+    pub fn resolve_device_id_collision(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
+        let m = self.clone();
+        Box::pin(async move {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let last = m.collision_regen_at.load(Ordering::SeqCst);
+            if now.saturating_sub(last) < 30 {
+                return; // 冷却期，跳过
+            }
+            m.collision_regen_at.store(now, Ordering::SeqCst);
+            let new_id = Uuid::new_v4().to_string();
+            dlog(&format!(
+                "[collision] 检测到 device_id 碰撞，本机重新生成为 {new_id}"
+            ));
+            {
+                let mut g = m.inner.lock().await;
+                g.config.device_id = new_id.clone();
+                // 同步回环检测用的本机设备标识，避免自己广播绕回时被误判为「对端」。
+                g.store.set_self_device(new_id.clone());
+                // 持久化，使新身份跨启动稳定（否则下次启动又读回旧的碰撞 id）。
+                persist_config(&g.db, &g.config);
+            }
+            // 用新身份重启发现：stop 使旧连接下线、关闭旧 mDNS；start 用新 device_id 重新注册。
+            m.stop().await;
+            m.start().await;
+            let _ = m.app.emit("refresh-tray", ());
+        })
     }
 
     /// 启动：注册 mDNS + 监听 + 浏览。幂等（重复调用安全）。
@@ -402,11 +447,10 @@ impl LanManager {
         inner.mdns = Some(mdns);
 
         // 3) mDNS 事件循环。
-        let inner_c = self.inner.clone();
-        let app_c = self.app.clone();
+        let mgr_c = self.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(event) = browse_rx.recv() {
-                handle_mdns_event(event, &inner_c, &app_c).await;
+                handle_mdns_event(event, &mgr_c).await;
             }
             // 通道关闭 -> 守护已停
         });
@@ -850,7 +894,9 @@ impl LanManager {
 // ===== 内部函数 =====
 
 /// 处理 mDNS 浏览事件：解析对端、按 device_id 决定角色、发起或忽略。
-async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: &AppHandle) {
+async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
+    let inner = &mgr.inner;
+    let app = &mgr.app;
     match event {
         ServiceEvent::ServiceResolved(info) => {
             let device_id = match info.get_property_val_str("device_id") {
@@ -906,11 +952,16 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
             if device_id == my_id {
                 // 危险信号：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
                 // 此时 `device_id >= my_id` 在两侧都成立 -> 双方都只监听、永不连接，
-                // 表现为「互相完全看不到」。需由用户清掉一端 lan_device_id 让其重新生成。
+                // 表现为「互相完全看不到」。本机自动重生 device_id 并重启发现以自愈。
                 dlog(&format!(
-                    "[mdns] 警告：对端 device_id 与本地完全相同（碰撞）={}，双方都只会监听，无法建立连接",
+                    "[mdns] 警告：对端 device_id 与本地完全相同（碰撞）={}，触发自动重生",
                     device_id
                 ));
+                let m = mgr.clone();
+                tauri::async_runtime::spawn(async move {
+                    m.resolve_device_id_collision().await;
+                });
+                return;
             }
             if device_id >= my_id {
                 dlog(&format!(
