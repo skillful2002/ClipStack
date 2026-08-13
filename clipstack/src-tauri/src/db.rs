@@ -552,12 +552,16 @@ pub fn get_item(conn: &Connection, key: Option<&Key>, id: i64) -> rusqlite::Resu
 }
 
 /// 删除：从 history 移到 trash（保留完整快照 + deleted_at）。
+/// 注意：trash 的 id 由自身自增分配，**不**沿用 history.id。否则 history 与 trash 共用
+/// 同一 id 命名空间，而 `restore_item` 恢复时给 history 重新分配自增 id，该 id 可能与
+/// trash 中已存在的行冲突；后续再删这条 history 行插入 trash 即触发
+/// `UNIQUE constraint failed: trash.id`，整笔事务回滚（表现为「清除失败」）。
 pub fn delete_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     let deleted_at = now_ms();
     tx.execute(
-        "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
-         SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
+        "INSERT INTO trash (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
+         SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
          FROM history WHERE id = ?",
         params![deleted_at, id],
     )?;
@@ -576,8 +580,8 @@ pub fn delete_items(conn: &mut Connection, ids: &[i64]) -> rusqlite::Result<usiz
     let tx = conn.transaction()?;
     for &id in ids {
         tx.execute(
-            "INSERT INTO trash (id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
-             SELECT id, content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
+            "INSERT INTO trash (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, deleted_at, is_sensitive) \
+             SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, ?, is_sensitive \
              FROM history WHERE id = ?",
             params![deleted_at, id],
         )?;
@@ -1266,6 +1270,39 @@ mod tests {
         let n = delete_items(&mut c, &[]).unwrap();
         assert_eq!(n, 0);
         assert_eq!(get_history(&c, None, 100, true).unwrap().len(), 1);
+    }
+
+    /// 回归：删 -> 恢复 -> 再删 不得触发 `UNIQUE constraint failed: trash.id`。
+    /// 旧实现把 history.id 原样拷入 trash.id，而 restore_item 给 history 重分配自增 id，
+    /// 该 id 可能等于 trash 中仍存在的某行 id；后续再删这条 history 行插入 trash 即冲突。
+    /// 修复后 trash 始终自增分配 id，与 history 解耦，故不再冲突。
+    #[test]
+    fn delete_restore_delete_no_trash_id_collision() {
+        let mut c = mem_db();
+        // 顺序插入得到 history id 1..4。
+        for i in 0..4 {
+            insert_or_bump(&c, None, &sample(&format!("h{i}"), i)).unwrap();
+        }
+        // 删除 id=4、id=3：trash 拥有 2 行（旧实现 id 分别为 4、3；新实现为自增）。
+        delete_item(&mut c, 4).unwrap();
+        delete_item(&mut c, 3).unwrap();
+        // 动态取出「原 item 4」所在 trash 行的 id（不依赖 id 是否等于 history id）。
+        let trash = get_trash(&c, None).unwrap();
+        assert_eq!(trash.len(), 2);
+        let t4 = trash
+            .iter()
+            .find(|t| t.hash == "h3")
+            .expect("原 item 4(h3) 应在回收站")
+            .id;
+        // 恢复该 trash 行：history 重新自增分配 id（旧实现可能复用 trash 中 existing 的 id）。
+        restore_item(&mut c, t4).unwrap();
+        // 取刚恢复出来的 history 行（id 最大者），再删一次：旧实现会因此冲突报错。
+        let hist = get_history(&c, None, 100, true).unwrap();
+        let restored_id = hist.iter().map(|h| h.id).max().unwrap();
+        delete_item(&mut c, restored_id).unwrap();
+        // 最终 trash 应有 2 行：一条从未恢复过的 + 一条刚从恢复再删的（新自增 id，无重复）。
+        let trash_final = get_trash(&c, None).unwrap();
+        assert_eq!(trash_final.len(), 2);
     }
 
 
