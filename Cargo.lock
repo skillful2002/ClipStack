@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "clipstack"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "arboard",

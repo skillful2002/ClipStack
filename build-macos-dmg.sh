@@ -22,15 +22,17 @@ cd "$ROOT"
 PRODUCT_NAME="ClipStack"
 APP_BIN="clipstack"          # .app 内可执行文件名（cargo bin name）
 # 版本号动态读取自 tauri.conf.json，避免与项目实际版本脱节
-VERSION="$(node -p "require('./src-tauri/tauri.conf.json').package.version" 2>/dev/null || echo "0.0.0")"
+# 注意：tauri.conf.json 中 version 位于顶层（非 package.version）
+VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version" 2>/dev/null || echo "0.0.0")"
 
 # 目标架构：默认本机 host triple
 HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
 TARGET="${1:-$HOST_TRIPLE}"
 
-# 跨架构构建时 cargo 产物目录统一为 src-tauri/target/<triple>/release
-# （即使 TARGET 等于本机 triple，因为脚本总是显式传 --target，产物也在 triple 子目录）
-CARGO_DIR="src-tauri/target/$TARGET/release"
+# 跨架构构建时 cargo 产物目录统一为 <workspace-root>/target/<triple>/release
+# 本仓库为 Cargo workspace（根 Cargo.toml 含 [workspace]），cargo 把产物放在仓库根 target 下，
+# 而非 clipstack/src-tauri/target。ROOT 指向 clipstack/，故 workspace target 为 ROOT/../target。
+CARGO_DIR="$ROOT/../target/$TARGET/release"
 
 # 产物名后缀
 case "$TARGET" in
