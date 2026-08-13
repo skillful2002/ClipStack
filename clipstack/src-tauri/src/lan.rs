@@ -330,6 +330,13 @@ impl LanManager {
             let mut inner = self.inner.lock().await;
         // 设置回环检测用的本机 device_id。
         let dev_id = inner.config.device_id.clone();
+        dlog(&format!(
+            "[start] device_id={} group={} key_empty={} share_out={}",
+            dev_id,
+            inner.config.share_group,
+            inner.config.share_key.is_empty(),
+            inner.config.share_out
+        ));
         inner.store.set_self_device(dev_id);
         // 新网络栈代际：使上一轮遗留的连接读任务失效（它们会在 register_conn 前因 gen 不匹配而跳过）。
         inner.gen = inner.gen.wrapping_add(1);
@@ -852,10 +859,23 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
             };
             let fp = info.get_property_val_str("group_fp").unwrap_or("").to_string();
             let name = info.get_property_val_str("name").unwrap_or("").to_string();
+            let my_fp = {
+                let g = inner.lock().await;
+                crypto::group_fingerprint(&g.config.share_group, &g.config.share_key)
+            };
+            let my_id = inner.lock().await.config.device_id.clone();
+            dlog(&format!(
+                "[mdns] ServiceResolved device_id={} name={} fp_match={} my_id={}",
+                device_id, name, fp == my_fp, my_id
+            ));
             // 分组指纹不一致 -> 跳过（不同组 / 不同密钥）。
             {
                 let mut g = inner.lock().await;
-                if fp != crypto::group_fingerprint(&g.config.share_group, &g.config.share_key) {
+                if fp != my_fp {
+                    dlog(&format!(
+                        "[mdns] 跳过：group_fp 不匹配（组/密钥不一致），peer={}",
+                        device_id
+                    ));
                     return;
                 }
                 // 记录对端友好名（供共享列表展示），优先于握手 hello。
@@ -883,9 +903,26 @@ async fn handle_mdns_event(event: ServiceEvent, inner: &Arc<Mutex<Inner>>, app: 
             };
             // 角色判定：本机 device_id 较大 -> 我是客户端，向对端发起；否则我监听，等对方连。
             let my_id = inner.lock().await.config.device_id.clone();
+            if device_id == my_id {
+                // 危险信号：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
+                // 此时 `device_id >= my_id` 在两侧都成立 -> 双方都只监听、永不连接，
+                // 表现为「互相完全看不到」。需由用户清掉一端 lan_device_id 让其重新生成。
+                dlog(&format!(
+                    "[mdns] 警告：对端 device_id 与本地完全相同（碰撞）={}，双方都只会监听，无法建立连接",
+                    device_id
+                ));
+            }
             if device_id >= my_id {
+                dlog(&format!(
+                    "[mdns] 角色判定：本地只监听（peer={} >= my={}），不主动连接",
+                    device_id, my_id
+                ));
                 return; // 我较小或相等 -> 仅监听
             }
+            dlog(&format!(
+                "[mdns] 角色判定：本地作为客户端连接 peer={}（my={}）addr={:?}",
+                device_id, my_id, addr
+            ));
             // 记录已知对端并发起客户端连接（带重连）。
             // 去重：mDNS 周期重宣告会重复触发 ServiceResolved，若已在对端表中则不重复
             // 拉起客户端任务，避免对同一对端建立多条连接（造成在线列表重复条目）。
@@ -967,10 +1004,12 @@ async fn spawn_client_retry(
             match tokio_tungstenite::connect_async(url).await {
                 Ok((ws, _)) => {
                     backoff = 1;
+                    dlog(&format!("[client] 连接成功 addr={}", addr));
                     if let Err(e) =
                         accept_peer(ws, &inner, &app, peer_id.clone()).await
                     {
                         eprintln!("[lan] 客户端连接处理失败: {e}");
+                        dlog(&format!("[client] accept_peer 失败 addr={}: {}", addr, e));
                     }
                     // 连接关闭 -> 重连（除非被要求停止）。
                     if stop.load(Ordering::SeqCst) {
@@ -980,6 +1019,7 @@ async fn spawn_client_retry(
                     backoff = (backoff * 2).min(30);
                 }
                 Err(_) => {
+                    dlog(&format!("[client] 连接失败 addr={}", addr));
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
