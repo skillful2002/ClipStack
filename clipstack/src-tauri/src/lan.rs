@@ -1562,6 +1562,19 @@ async fn register_conn(
 ) {
     let (is_new, resolved) = {
         let mut g = inner.lock().await;
+        // 自连守卫：拒绝把「本机自己」登记为在线对端。
+        // 触发场景：device_id 碰撞自愈（resolve_device_id_collision）会 stop()+start() 改掉
+        // 本机 device_id；在改 id 的重启瞬间，本机 mDNS 浏览可能解析到自己的旧服务
+        // （旧 id != 新 id），若不加这道守卫就会被当成对端去连，导致本机把自己显示为
+        // 一台「在线设备」，表现为另一端（或本机）在线列表里出现两台一模一样的设备。
+        let my_id = g.config.device_id.clone();
+        if device_id == my_id {
+            dlog(&format!(
+                "[lan] 拒绝自连：peer={} == 本机 device_id，跳过登记",
+                device_id
+            ));
+            return;
+        }
         // 共享已关闭：任何连接都不得登记进「在线设备」列表。否则 stop() 清空 conns 后，
         // 在途的 accept_peer（已捕获 stop 之后的新 gen）会再次把对端插回 conns，造成
         // 「关闭共享后设备仍在在线列表 / 下线又复活 / 同步已停却显示在线」的假在线。
@@ -1590,6 +1603,12 @@ async fn register_conn(
         if !g.peer_names.contains_key(device_id) {
             g.peer_names.insert(device_id.to_string(), resolved.clone());
         }
+        dlog(&format!(
+            "[lan] register_conn: device={} is_new={} 当前 conns=[{}]",
+            device_id,
+            is_new,
+            g.conns.keys().cloned().collect::<Vec<_>>().join(", ")
+        ));
         (is_new, resolved)
     };
     if is_new {
@@ -1639,6 +1658,11 @@ async fn update_peer_name(
 async fn remove_conn(inner: &Arc<Mutex<Inner>>, app: &AppHandle, device_id: &str) {
     let existed = {
         let mut g = inner.lock().await;
+        dlog(&format!(
+            "[lan] remove_conn: device={} 移除前 conns=[{}]",
+            device_id,
+            g.conns.keys().cloned().collect::<Vec<_>>().join(", ")
+        ));
         g.conns.remove(device_id).is_some()
     };
     // 同步清理中止句柄，避免泄漏（stop() 已统一 abort 并清空，此处兜底常态断线场景）。
