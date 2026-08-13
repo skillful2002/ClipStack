@@ -16,7 +16,7 @@ use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::AppState;
 use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_quit, tray_settings, tray_share, tray_share_off, tray_share_on, Lang, MenuLang};
-use crate::lan::{dlog, LanManager};
+use crate::lan::LanManager;
 use crate::models::ContentType;
 use crate::set_dock_visible;
 
@@ -103,7 +103,6 @@ fn build_menu(
         .try_state::<LanManager>()
         .map(|m| m.is_share_out())
         .unwrap_or(false);
-    dlog(&format!("[tray] build_menu: lan_on={lan_on}"));
 
     if locked {
         // 锁定态：仅给一个「点击解锁」占位项，绝不泄露明文或密文。
@@ -315,10 +314,8 @@ fn handle_menu_event(
         // 共享菜单项 id 带状态后缀（toggle_share:on / :off），此处按前缀匹配。
         id if id.starts_with("toggle_share") => {
             // 托盘「共享」开关：读取当前状态并取反，切换 share_out（会热重启发现）。
-            dlog(&format!("[tray] 共享菜单被点击，id={id}"));
             if let Some(mgr) = app.try_state::<LanManager>() {
                 let on = mgr.is_share_out();
-                dlog(&format!("[tray] 当前 share_out={on}，将切换为 {}", !on));
                 // 关键：必须用 spawn 异步执行，绝不能用 block_on。
                 // `set_share_out` 内部会 `spawn` 后台任务（mDNS 事件循环 / TCP 监听 /
                 // 周期重宣告）并 `await` 它们结束；在主线程上用 `block_on` 驱动这个 future
@@ -329,19 +326,16 @@ fn handle_menu_event(
                     match app2.state::<LanManager>().set_share_out(!on).await {
                         Ok(()) => {
                             // 切换成功（含前置条件校验通过），刷新菜单圆点 / 状态文字。
-                            dlog("[tray] set_share_out Ok，emit refresh-tray");
                             let _ = app2.emit("refresh-tray", ());
                         }
                         Err(e) => {
-                            // 前置条件不满足（组 / 密钥 / 端口未配置）：转发给前端弹出提示，
-                            // 同时写诊断日志，便于打包环境下确认「点了没反应」的真实原因。
-                            dlog(&format!("[tray] set_share_out Err: {e}"));
+                            // 前置条件不满足（组 / 密钥 / 端口未配置）：转发给前端弹出提示。
                             let _ = app2.emit("lan-config-error", e.clone());
                         }
                     }
                 });
             } else {
-                dlog("[tray] 致命：try_state::<LanManager>() 返回 None，无法切换共享");
+                // LanManager 未注册，无法切换共享（理论上不应发生）。
             }
         }
         "tray_lock" => {

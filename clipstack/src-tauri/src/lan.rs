@@ -36,22 +36,6 @@ pub const SERVICE_TYPE: &str = "_clipstack._tcp.local.";
 pub const LAN_PORT: u16 = 21995;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 诊断日志：同时输出到 stderr 与临时文件，便于打包(release)环境下复现「卡死」时定位卡点。
-#[allow(dead_code)]
-pub(crate) fn dlog(msg: &str) {
-    use std::io::Write as _;
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let line = format!("[lan][{ts}] {msg}");
-    eprintln!("{line}");
-    let path = std::env::temp_dir().join("clipstack_lan.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(f, "{line}");
-    }
-}
-
 /// 局域网共享配置（内存态；落库经内部密钥包装为 wrapped_key，见 L3）。
 #[derive(Clone)]
 pub struct LanConfig {
@@ -350,9 +334,6 @@ impl LanManager {
             }
             m.collision_regen_at.store(now, Ordering::SeqCst);
             let new_id = Uuid::new_v4().to_string();
-            dlog(&format!(
-                "[collision] 检测到 device_id 碰撞，本机重新生成为 {new_id}"
-            ));
             {
                 let mut g = m.inner.lock().await;
                 g.config.device_id = new_id.clone();
@@ -370,18 +351,10 @@ impl LanManager {
 
     /// 启动：注册 mDNS + 监听 + 浏览。幂等（重复调用安全）。
     pub async fn start(&self) {
-        dlog("start() 进入");
         let manual_peers = {
             let mut inner = self.inner.lock().await;
         // 设置回环检测用的本机 device_id。
         let dev_id = inner.config.device_id.clone();
-        dlog(&format!(
-            "[start] device_id={} group={} key_empty={} share_out={}",
-            dev_id,
-            inner.config.share_group,
-            inner.config.share_key.is_empty(),
-            inner.config.share_out
-        ));
         inner.store.set_self_device(dev_id);
         // 新网络栈代际：使上一轮遗留的连接读任务失效（它们会在 register_conn 前因 gen 不匹配而跳过）。
         inner.gen = inner.gen.wrapping_add(1);
@@ -426,15 +399,12 @@ impl LanManager {
         };
         // 克隆一份实例与守护句柄，供下方周期重宣告任务使用（避免占用 `info`/`mdns`）。
         let info_for_reannounce = info.clone();
-        dlog("start: 即将 mDNS register");
         if let Err(e) = mdns.register(info) {
             eprintln!("[lan] mDNS 注册失败: {e}");
             return;
         }
-        dlog("start: mDNS register 完成");
 
         // 2) 浏览同服务。
-        dlog("start: 即将 mDNS browse");
         let browse_rx = match mdns.browse(SERVICE_TYPE) {
             Ok(rx) => rx,
             Err(e) => {
@@ -442,7 +412,6 @@ impl LanManager {
                 return;
             }
         };
-        dlog("start: mDNS browse 完成");
         let mdns_daemon = mdns.clone();
         inner.mdns = Some(mdns);
 
@@ -514,20 +483,17 @@ impl LanManager {
                 std::time::Duration::from_secs(7),
                 std::time::Duration::from_secs(15),
             ];
-            for (i, d) in delays.iter().enumerate() {
+            for d in delays.iter() {
                 tokio::time::sleep(*d).await;
                 let alive = {
                     let g = inner_ra.lock().await;
                     g.config.share_out && g.mdns.is_some()
                 };
                 if !alive {
-                    dlog("reannounce 终止：共享已关闭");
                     break;
                 }
-                dlog(&format!("reannounce 第 {} 次", i + 1));
                 let _ = mdns_daemon.register(info_for_reannounce.clone());
             }
-            dlog("reannounce 任务结束");
         });
         inner.reannounce_task = Some(reannounce);
         // 在释放 inner 守卫前先把手动对端地址克隆出来。
@@ -547,7 +513,6 @@ impl LanManager {
             Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
         }
     }
-    dlog("start() 完成");
 }
 
     /// 更新配置。
@@ -561,12 +526,6 @@ impl LanManager {
     /// 的逐字符输入）都会 `stop()` + `start()`，导致：① 正在传输的文件因连接被 tearing
     /// down 而丢失；② `peer_names` 被清空，随后收到的剪贴板来源回退为设备 ID。
     pub async fn set_config(&self, cfg: LanConfig) -> Result<(), String> {
-        eprintln!(
-            "[lan] set_config 进入 share_out={} group={} key_empty={}",
-            cfg.share_out,
-            cfg.share_group,
-            cfg.share_key.is_empty()
-        );
         // 若要开启共享，必须先配置组 / 密钥 / 端口；缺失则返回错误，且不改动任何状态。
         if cfg.share_out {
             let missing = Self::missing_share_prereqs(&cfg);
@@ -598,11 +557,8 @@ impl LanManager {
         }
         if need_restart {
             // 停掉旧的 mDNS，重新 start。
-            dlog("set_config: 即将 stop()");
             self.stop().await;
-            dlog("set_config: stop() 完成，即将 start()");
             self.start().await;
-            dlog("set_config: start() 完成");
         }
         if share_changed {
             // 共享开关变化：通知前端同步（lan-config-changed）并刷新托盘菜单的圆点 / 状态文字。
@@ -614,7 +570,6 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        dlog("stop() 进入");
         let (server_handle, reannounce_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
@@ -776,7 +731,6 @@ impl LanManager {
     }
 
     pub async fn set_share_out(&self, enabled: bool) -> Result<(), String> {
-        dlog(&format!("[lan] set_share_out 进入 enabled={enabled}"));
         // 开启共享前校验前置条件：组 / 密钥 / 端口三者缺一不可，否则返回错误提示，
         // 且不改变任何状态（托盘 / 前端据此提示用户先完成配置）。
         if enabled {
@@ -790,7 +744,6 @@ impl LanManager {
         }
         let changed = {
             let mut inner = self.inner.lock().await;
-            dlog("[lan] set_share_out: 已获取 inner 锁");
             if inner.config.share_out == enabled {
                 // 已是目标状态，无需改动（也避免无谓的 stop/start）。
                 false
@@ -800,7 +753,6 @@ impl LanManager {
                 self.share_out_flag.store(enabled, Ordering::SeqCst);
                 // 仅开关变更也要持久化，否则重启后回退。
                 persist_config(&inner.db, &inner.config);
-                dlog("[lan] set_share_out: persist_config 完成");
                 true
             }
         };
@@ -909,19 +861,10 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 let g = inner.lock().await;
                 crypto::group_fingerprint(&g.config.share_group, &g.config.share_key)
             };
-            let my_id = inner.lock().await.config.device_id.clone();
-            dlog(&format!(
-                "[mdns] ServiceResolved device_id={} name={} fp_match={} my_id={}",
-                device_id, name, fp == my_fp, my_id
-            ));
             // 分组指纹不一致 -> 跳过（不同组 / 不同密钥）。
             {
                 let mut g = inner.lock().await;
                 if fp != my_fp {
-                    dlog(&format!(
-                        "[mdns] 跳过：group_fp 不匹配（组/密钥不一致），peer={}",
-                        device_id
-                    ));
                     return;
                 }
                 // 记录对端友好名（供共享列表展示），优先于握手 hello。
@@ -953,10 +896,6 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 // 危险信号：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
                 // 此时 `device_id >= my_id` 在两侧都成立 -> 双方都只监听、永不连接，
                 // 表现为「互相完全看不到」。本机自动重生 device_id 并重启发现以自愈。
-                dlog(&format!(
-                    "[mdns] 警告：对端 device_id 与本地完全相同（碰撞）={}，触发自动重生",
-                    device_id
-                ));
                 let m = mgr.clone();
                 tauri::async_runtime::spawn(async move {
                     m.resolve_device_id_collision().await;
@@ -964,16 +903,8 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 return;
             }
             if device_id >= my_id {
-                dlog(&format!(
-                    "[mdns] 角色判定：本地只监听（peer={} >= my={}），不主动连接",
-                    device_id, my_id
-                ));
                 return; // 我较小或相等 -> 仅监听
             }
-            dlog(&format!(
-                "[mdns] 角色判定：本地作为客户端连接 peer={}（my={}）addr={:?}",
-                device_id, my_id, addr
-            ));
             // 记录已知对端并发起客户端连接（带重连）。
             // 去重：mDNS 周期重宣告会重复触发 ServiceResolved，若已在对端表中则不重复
             // 拉起客户端任务，避免对同一对端建立多条连接（造成在线列表重复条目）。
@@ -1055,12 +986,10 @@ async fn spawn_client_retry(
             match tokio_tungstenite::connect_async(url).await {
                 Ok((ws, _)) => {
                     backoff = 1;
-                    dlog(&format!("[client] 连接成功 addr={}", addr));
                     if let Err(e) =
                         accept_peer(ws, &inner, &app, peer_id.clone()).await
                     {
                         eprintln!("[lan] 客户端连接处理失败: {e}");
-                        dlog(&format!("[client] accept_peer 失败 addr={}: {}", addr, e));
                     }
                     // 连接关闭 -> 重连（除非被要求停止）。
                     if stop.load(Ordering::SeqCst) {
@@ -1070,7 +999,6 @@ async fn spawn_client_retry(
                     backoff = (backoff * 2).min(30);
                 }
                 Err(_) => {
-                    dlog(&format!("[client] 连接失败 addr={}", addr));
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
@@ -1569,10 +1497,6 @@ async fn register_conn(
         // 一台「在线设备」，表现为另一端（或本机）在线列表里出现两台一模一样的设备。
         let my_id = g.config.device_id.clone();
         if device_id == my_id {
-            dlog(&format!(
-                "[lan] 拒绝自连：peer={} == 本机 device_id，跳过登记",
-                device_id
-            ));
             return;
         }
         // 共享已关闭：任何连接都不得登记进「在线设备」列表。否则 stop() 清空 conns 后，
@@ -1603,12 +1527,6 @@ async fn register_conn(
         if !g.peer_names.contains_key(device_id) {
             g.peer_names.insert(device_id.to_string(), resolved.clone());
         }
-        dlog(&format!(
-            "[lan] register_conn: device={} is_new={} 当前 conns=[{}]",
-            device_id,
-            is_new,
-            g.conns.keys().cloned().collect::<Vec<_>>().join(", ")
-        ));
         (is_new, resolved)
     };
     if is_new {
@@ -1658,11 +1576,6 @@ async fn update_peer_name(
 async fn remove_conn(inner: &Arc<Mutex<Inner>>, app: &AppHandle, device_id: &str) {
     let existed = {
         let mut g = inner.lock().await;
-        dlog(&format!(
-            "[lan] remove_conn: device={} 移除前 conns=[{}]",
-            device_id,
-            g.conns.keys().cloned().collect::<Vec<_>>().join(", ")
-        ));
         g.conns.remove(device_id).is_some()
     };
     // 同步清理中止句柄，避免泄漏（stop() 已统一 abort 并清空，此处兜底常态断线场景）。
