@@ -1,6 +1,6 @@
 // P3 · 中间主列表：时间筛选标签 + 按日分组的历史条目。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useHistory, filterItems, type TimeFilter } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { dayLabel } from "../lib/format";
@@ -39,6 +39,7 @@ export function HistoryList() {
   const select = useHistory((s) => s.select);
   const { copy, pin, fav, del, save, open, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const listBodyRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(
     () => filterItems(items, category, timeFilter, search, sourceFilter, filterDate),
@@ -50,6 +51,11 @@ export function HistoryList() {
     const firstId = filtered[0]?.id ?? null;
     if (useHistory.getState().selectedId !== firstId) select(firstId);
   }, [filtered, select]);
+
+  // 查询条件切换后，中间列表始终滚动回最开始。
+  useEffect(() => {
+    listBodyRef.current?.scrollTo({ top: 0 });
+  }, [category, timeFilter, search, sourceFilter, filterDate]);
 
   // 按日分组（保持置顶优先、时间倒序的既有顺序）。
   const groups = useMemo(() => {
@@ -107,7 +113,7 @@ export function HistoryList() {
         </div>
       </div>
 
-      <div className="list-body">
+      <div className="list-body" ref={listBodyRef}>
         {filtered.length === 0 ? (
           <div className="list-empty">
             {search ? t("list.emptySearch") : t("list.emptyDefault")}
