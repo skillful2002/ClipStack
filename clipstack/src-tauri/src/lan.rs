@@ -231,6 +231,9 @@ pub struct PortInUsePayload {
 /// 一条已建立的对端连接句柄：持有写端 mpsc，用于向该对端推送信封。
 struct ConnHandle {
     device_id: String,
+    /// 对端 IP（不含端口），用于「同机」去重判定：同一 IP + 同一主机名即视为同一台机器，
+    /// 避免误伤局域网内不同 IP 的同名真机（克隆镜像 / 批量部署）。
+    addr: String,
     tx: mpsc::UnboundedSender<Message>,
 }
 
@@ -443,14 +446,14 @@ impl LanManager {
             };
             loop {
                 match listener.accept().await {
-                    Ok((socket, _)) => {
+                    Ok((socket, peer_addr)) => {
                         let inner_cc = inner_l.clone();
                         let app_cc = app_l.clone();
                         tauri::async_runtime::spawn(async move {
                             match tokio_tungstenite::accept_async(socket).await {
                                 Ok(ws) => {
                                     if let Err(e) =
-                                        accept_peer(ws, &inner_cc, &app_cc, None).await
+                                        accept_peer(ws, &inner_cc, &app_cc, None, peer_addr).await
                                     {
                                         eprintln!("[lan] 接受对端连接失败: {e}");
                                     }
@@ -987,7 +990,7 @@ async fn spawn_client_retry(
                 Ok((ws, _)) => {
                     backoff = 1;
                     if let Err(e) =
-                        accept_peer(ws, &inner, &app, peer_id.clone()).await
+                        accept_peer(ws, &inner, &app, peer_id.clone(), addr).await
                     {
                         eprintln!("[lan] 客户端连接处理失败: {e}");
                     }
@@ -1018,6 +1021,7 @@ async fn accept_peer<S>(
     inner: &Arc<Mutex<Inner>>,
     app: &AppHandle,
     peer_id: Option<String>,
+    addr: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -1051,7 +1055,7 @@ where
         (g.config.device_id.clone(), g.config.device_name.clone())
     };
     if let Some(id) = &peer_id {
-        register_conn(&inner, &app, id, tx_r.clone(), my_gen).await;
+        register_conn(&inner, &app, id, tx_r.clone(), my_gen, addr).await;
     }
     let hello = serde_json::json!({
         "type": "hello",
@@ -1114,7 +1118,7 @@ where
                                         let mut g = inner_r.lock().await;
                                         g.peer_names.entry(rid.to_string()).or_insert(nm.clone());
                                     }
-                                    register_conn(&inner_r, &app_r, rid, tx_r.clone(), my_gen).await;
+                                    register_conn(&inner_r, &app_r, rid, tx_r.clone(), my_gen, addr).await;
                                     // 服务端侧此时才学到对端 id：登记中止句柄，使 stop() 能断开本连接。
                                     let handle_opt = abort_slot.lock().unwrap().clone();
                                     if let Some(h) = handle_opt {
@@ -1176,7 +1180,7 @@ where
                     // 首个信封获知对端 id（服务端侧）。
                     if learned_id.is_none() {
                         learned_id = Some(rid.clone());
-                        register_conn(&inner_r, &app_r, &rid, tx_r.clone(), my_gen).await;
+                        register_conn(&inner_r, &app_r, &rid, tx_r.clone(), my_gen, addr).await;
                         // 服务端侧此时才学到对端 id：登记中止句柄，使 stop() 能断开本连接。
                         let handle_opt = abort_slot.lock().unwrap().clone();
                         if let Some(h) = handle_opt {
@@ -1487,6 +1491,7 @@ async fn register_conn(
     device_id: &str,
     tx: mpsc::UnboundedSender<Message>,
     my_gen: u64,
+    addr: SocketAddr,
 ) {
     let (is_new, resolved) = {
         let mut g = inner.lock().await;
@@ -1516,11 +1521,48 @@ async fn register_conn(
             .get(device_id)
             .cloned()
             .unwrap_or_else(|| device_id.to_string());
+
+        // 同机去重：若已存在「相同 IP 且相同 name（主机名）但不同 device_id」的旧连接，
+        // 先踢掉旧条目再注册新的。只在「同一台机器换了 UUID（网络波动 / 重连 /
+        // device_id 碰撞重生 / 僵尸连接未及时清理）」时合并；绝不误伤局域网内
+        // 不同 IP 的同名真机（克隆镜像、企业批量部署），规避纯 name 去重导致的互相踢、
+        // 共享乒乓抖动甚至失败。地址只用 IP（忽略端口），以兼容重连换端口的场景。
+        let new_ip = addr.ip().to_string();
+        let old_id: Option<String> = g
+            .conns
+            .iter()
+            .find(|(id, h)| {
+                *id != device_id
+                    && h.addr == new_ip
+                    && g.peer_names.get(*id).map_or(false, |n| n == &resolved)
+            })
+            .map(|(id, _)| id.clone());
+        if let Some(ref oid) = old_id {
+            g.conns.remove(oid);
+            g.peer_names.remove(oid);
+            // 中止旧连接的读任务，真正关闭 socket
+            if let Some(abort) = g.conn_aborts.remove(oid) {
+                abort.abort();
+            }
+            drop(g);
+            let _ = app.emit(
+                "lan-peer-offline",
+                PeerInfo {
+                    device_id: oid.clone(),
+                    name: String::new(),
+                    addr: String::new(),
+                    connected: false,
+                },
+            );
+            g = inner.lock().await;
+        }
+
         let is_new = !g.conns.contains_key(device_id);
         g.conns.insert(
             device_id.to_string(),
             ConnHandle {
                 device_id: device_id.to_string(),
+                addr: new_ip,
                 tx,
             },
         );
