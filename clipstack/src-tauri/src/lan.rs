@@ -695,16 +695,23 @@ impl LanManager {
         inner
             .conns
             .values()
-            .map(|h| PeerInfo {
-                device_id: h.device_id.clone(),
-                name: inner
+            .map(|h| {
+                let name = inner
                     .peer_names
                     .get(&h.device_id)
                     .cloned()
-                    .unwrap_or_else(|| h.device_id.clone()),
-                addr: String::new(),
-                connected: true,
+                    .unwrap_or_else(|| h.device_id.clone());
+                PeerInfo {
+                    device_id: h.device_id.clone(),
+                    name: name.clone(),
+                    addr: String::new(),
+                    connected: true,
+                }
             })
+            // 防御性过滤：排除无有效主机名的条目（name 为空或回退为 device_id）。
+            // 这些是 stale mDNS / 未完成握手的幽灵连接，不应展示给用户。
+            // 上游（mDNS 层 + register_conn）已拦截大部分，此处为最终安全网。
+            .filter(|p| !p.name.is_empty() && p.name != p.device_id)
             .collect()
     }
 
@@ -907,6 +914,11 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
             }
             if device_id >= my_id {
                 return; // 我较小或相等 -> 仅监听
+            }
+            // 名称缺失守卫：mDNS TXT 中无 name 字段（对端停止共享后的 stale 记录、
+            // 或广播尚未完整）时不发起连接，避免注册「无名」连接导致在线列表显示为 UUID。
+            if name.is_empty() {
+                return;
             }
             // 记录已知对端并发起客户端连接（带重连）。
             // 去重：mDNS 周期重宣告会重复触发 ServiceResolved，若已在对端表中则不重复
@@ -1521,6 +1533,14 @@ async fn register_conn(
             .get(device_id)
             .cloned()
             .unwrap_or_else(|| device_id.to_string());
+
+        // 无名守卫：对端无有效主机名（mDNS TXT 缺失 name / stale 记录 /
+        // 握手 hello 尚未到达）时拒绝登记。否则在线列表会显示为纯 UUID
+        //（前端 `name || deviceId` 在 name 为空时回退到 UUID），表现为「停止共享后
+        // 出现一串机器 ID」的幽灵设备。必须等拿到真实名称后才允许上线。
+        if resolved.is_empty() || resolved == *device_id {
+            return;
+        }
 
         // 同机去重：若已存在「相同 IP 且相同 name（主机名）但不同 device_id」的旧连接，
         // 先踢掉旧条目再注册新的。只在「同一台机器换了 UUID（网络波动 / 重连 /
