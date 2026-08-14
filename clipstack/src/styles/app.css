@@ -242,6 +242,24 @@
   font-weight: 600;
 }
 
+/* 「指定日期」激活时显示的日期选择器。 */
+.time-date {
+  margin-left: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-bg-secondary, rgba(128, 128, 128, 0.08));
+  color: var(--cs-text-primary);
+  font-size: 13px;
+  color-scheme: light dark;
+  cursor: pointer;
+}
+
+.time-date:focus-visible {
+  outline: 2px solid var(--cs-accent);
+  outline-offset: 1px;
+}
+
 .list-count {
   font-size: 12px;
   color: var(--cs-text-tertiary);

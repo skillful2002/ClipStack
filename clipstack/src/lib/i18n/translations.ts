@@ -26,6 +26,9 @@ const zhCN: Dict = {
   "timefilter.today": "今天",
   "timefilter.yesterday": "昨天",
   "timefilter.week": "本周",
+  "timefilter.month": "本月",
+  "timefilter.date": "指定日期",
+  "timefilter.dateAria": "选择日期",
 
   "list.clearAllTooltip": "清除全部记录",
   "list.clearAllButton": "清除全部",
@@ -342,6 +345,9 @@ const zhTW: Dict = {
   "timefilter.today": "今天",
   "timefilter.yesterday": "昨天",
   "timefilter.week": "本週",
+  "timefilter.month": "本月",
+  "timefilter.date": "指定日期",
+  "timefilter.dateAria": "選擇日期",
 
   "list.clearAllTooltip": "清除全部紀錄",
   "list.clearAllButton": "清除全部",
@@ -658,6 +664,9 @@ const en: Dict = {
   "timefilter.today": "Today",
   "timefilter.yesterday": "Yesterday",
   "timefilter.week": "This Week",
+  "timefilter.month": "This Month",
+  "timefilter.date": "Date",
+  "timefilter.dateAria": "Pick a date",
 
   "list.clearAllTooltip": "Clear all records",
   "list.clearAllButton": "Clear All",
@@ -974,6 +983,9 @@ const ja: Dict = {
   "timefilter.today": "今日",
   "timefilter.yesterday": "昨日",
   "timefilter.week": "今週",
+  "timefilter.month": "今月",
+  "timefilter.date": "指定日",
+  "timefilter.dateAria": "日付を選択",
 
   "list.clearAllTooltip": "すべての記録を消去",
   "list.clearAllButton": "すべて消去",
@@ -1290,6 +1302,9 @@ const de: Dict = {
   "timefilter.today": "Heute",
   "timefilter.yesterday": "Gestern",
   "timefilter.week": "Diese Woche",
+  "timefilter.month": "Dieser Monat",
+  "timefilter.date": "Datum",
+  "timefilter.dateAria": "Datum wählen",
 
   "list.clearAllTooltip": "Alle Einträge löschen",
   "list.clearAllButton": "Alle löschen",
@@ -1606,6 +1621,9 @@ const fr: Dict = {
   "timefilter.today": "Aujourd'hui",
   "timefilter.yesterday": "Hier",
   "timefilter.week": "Cette semaine",
+  "timefilter.month": "Ce mois",
+  "timefilter.date": "Date",
+  "timefilter.dateAria": "Choisir une date",
 
   "list.clearAllTooltip": "Effacer tous les enregistrements",
   "list.clearAllButton": "Tout effacer",

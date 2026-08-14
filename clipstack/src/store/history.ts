@@ -11,7 +11,7 @@ import type { UpdateCheck } from "../lib/tauri";
 /** 侧边栏分类：全部 + 五种内容类型。 */
 export type Category = ContentType | "all";
 /** 主列表时间筛选。 */
-export type TimeFilter = "all" | "today" | "yesterday" | "week";
+export type TimeFilter = "all" | "today" | "yesterday" | "week" | "month" | "date";
 /** 主区域视图。 */
 export type View = "main" | "settings" | "trash" | "about" | "help";
 
@@ -23,6 +23,8 @@ interface HistoryState {
   search: string;
   /** 按来源应用过滤（null 表示不过滤；空串 "" 表示「未知来源」）。 */
   sourceFilter: string | null;
+  /** 指定日期过滤（"YYYY-MM-DD"；仅 timeFilter==="date" 时生效，null 视为今天）。 */
+  filterDate: string | null;
   view: View;
   loading: boolean;
   error: string | null;
@@ -51,6 +53,7 @@ interface HistoryState {
   setTimeFilter: (t: TimeFilter) => void;
   setSearch: (s: string) => void;
   setSourceFilter: (s: string | null) => void;
+  setFilterDate: (d: string | null) => void;
   setView: (v: View) => void;
   /** 实时事件：新条目到达（同 id 替换，否则前置）。 */
   prepend: (item: HistoryItem) => void;
@@ -76,6 +79,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   timeFilter: "all",
   search: "",
   sourceFilter: null,
+  filterDate: null,
   view: "main",
   loading: false,
   error: null,
@@ -157,6 +161,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   setTimeFilter: (timeFilter) => set({ timeFilter }),
   setSearch: (search) => set({ search }),
   setSourceFilter: (sourceFilter) => set({ sourceFilter }),
+  setFilterDate: (filterDate) => set({ filterDate }),
   setView: (view) => set({ view }),
   setToast: (toast) => set({ toast }),
   setUpdateInfo: (updateInfo) => set({ updateInfo }),
@@ -204,12 +209,27 @@ export function filterItems(
   timeFilter: TimeFilter,
   search: string,
   sourceFilter: string | null = null,
+  filterDate: string | null = null,
 ): HistoryItem[] {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfYesterday = startOfToday.getTime() - 86_400_000;
   const startOfWeek = startOfToday.getTime() - 7 * 86_400_000;
+  const startOfMonth = new Date(
+    startOfToday.getFullYear(),
+    startOfToday.getMonth(),
+    1,
+  ).getTime();
   const q = search.trim().toLowerCase();
+
+  // 指定日期的起止（本地时区；filterDate 为 null 时视为今天）。
+  let dateStart = startOfToday.getTime();
+  let dateEnd = dateStart + 86_400_000;
+  if (timeFilter === "date" && filterDate) {
+    const [y, m, d] = filterDate.split("-").map(Number);
+    dateStart = new Date(y, m - 1, d).getTime();
+    dateEnd = dateStart + 86_400_000;
+  }
 
   return items.filter((it) => {
     if (category !== "all" && it.contentType !== category) return false;
@@ -223,6 +243,8 @@ export function filterItems(
       )
         return false;
       if (timeFilter === "week" && t < startOfWeek) return false;
+      if (timeFilter === "month" && t < startOfMonth) return false;
+      if (timeFilter === "date" && (t < dateStart || t >= dateEnd)) return false;
     }
 
     // 按来源过滤：sourceFilter 为 null 时不过滤；空串代表「未知来源」。

@@ -14,7 +14,16 @@ const TIME_TABS: { key: TimeFilter; labelKey: string }[] = [
   { key: "today", labelKey: "timefilter.today" },
   { key: "yesterday", labelKey: "timefilter.yesterday" },
   { key: "week", labelKey: "timefilter.week" },
+  { key: "month", labelKey: "timefilter.month" },
+  { key: "date", labelKey: "timefilter.date" },
 ];
+
+/** 本地日期的 "YYYY-MM-DD"（避免 toISOString 的 UTC 偏移）。 */
+function todayISO(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 export function HistoryList() {
   const t = useT();
@@ -24,14 +33,16 @@ export function HistoryList() {
   const setTimeFilter = useHistory((s) => s.setTimeFilter);
   const search = useHistory((s) => s.search);
   const sourceFilter = useHistory((s) => s.sourceFilter);
+  const filterDate = useHistory((s) => s.filterDate);
+  const setFilterDate = useHistory((s) => s.setFilterDate);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
   const { copy, pin, fav, del, save, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
-    () => filterItems(items, category, timeFilter, search, sourceFilter),
-    [items, category, timeFilter, search, sourceFilter],
+    () => filterItems(items, category, timeFilter, search, sourceFilter, filterDate),
+    [items, category, timeFilter, search, sourceFilter, filterDate],
   );
 
   // 中间列表数据发生变化时，始终选中第一行（空列表则取消选中）。
@@ -60,11 +71,27 @@ export function HistoryList() {
             <button
               key={tt.key}
               className={`time-tab${timeFilter === tt.key ? " active" : ""}`}
-              onClick={() => setTimeFilter(tt.key)}
+              onClick={() => {
+                if (tt.key === "date" && !filterDate) setFilterDate(todayISO());
+                setTimeFilter(tt.key);
+              }}
             >
               {t(tt.labelKey)}
             </button>
           ))}
+          {timeFilter === "date" && (
+            <input
+              type="date"
+              className="time-date"
+              value={filterDate ?? todayISO()}
+              max={todayISO()}
+              onChange={(e) => {
+                setFilterDate(e.target.value);
+                setTimeFilter("date");
+              }}
+              aria-label={t("timefilter.dateAria")}
+            />
+          )}
         </div>
         <div className="toolbar-right">
           <button
