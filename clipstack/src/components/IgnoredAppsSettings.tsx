@@ -96,7 +96,7 @@ export function IgnoredAppsSettings() {
             if (e.key === "Enter") void addApp();
           }}
         />
-        <button onClick={() => void addApp()}>{t("settings.add")}</button>
+        <button className="sec-btn outline" onClick={() => void addApp()}>{t("settings.add")}</button>
       </div>
 
       <div className="settings-add">
@@ -121,7 +121,7 @@ export function IgnoredAppsSettings() {
               </option>
             ))}
         </select>
-        <button onClick={() => void addSelectedApp()} disabled={!selectedSys}>
+        <button className="sec-btn outline" onClick={() => void addSelectedApp()} disabled={!selectedSys}>
           {t("settings.addSelected")}
         </button>
       </div>

@@ -1171,6 +1171,13 @@
   border-color: var(--cs-accent);
 }
 
+/* 「添加」「添加选中」按钮（带 .sec-btn）与输入框/下拉框同高 36px：
+   .sec-btn 自带 align-self:flex-start 会破坏 flex 行拉伸，这里覆盖回去。 */
+.settings-add .sec-btn {
+  align-self: stretch;
+  height: 36px;
+}
+
 .settings-list {
   display: flex;
   flex-wrap: wrap;
@@ -1550,8 +1557,9 @@
 }
 
 .segmented button.active {
-  background: var(--cs-accent-strong, var(--cs-accent, #4c6ef5));
-  color: #fff;
+  background: var(--cs-accent-soft);
+  color: var(--cs-accent);
+  font-weight: 600;
 }
 
 .switch {
@@ -1893,11 +1901,23 @@
   opacity: 0.6;
   cursor: default;
 }
+/* 描边风格（绿色）：透明背景 + 绿色边框与文字，用于次要操作（如清理、锁定、改密、添加）。 */
+.sec-btn.outline {
+  background: transparent;
+  color: var(--cs-accent);
+  border: 1px solid var(--cs-accent);
+}
+.sec-btn.outline:hover {
+  background: var(--cs-accent-soft);
+}
+/* 危险描边（红色）：透明背景 + 红色边框与文字（如清除主密码）。 */
 .sec-btn.danger {
-  background: #e03131;
+  background: transparent;
+  color: var(--cs-danger, #e5484d);
+  border: 1px solid var(--cs-danger, #e5484d);
 }
 .sec-btn.danger:hover {
-  background: #c92a2a;
+  background: color-mix(in srgb, var(--cs-danger, #e5484d) 12%, transparent);
 }
 .sec-on {
   color: #2f9e44;

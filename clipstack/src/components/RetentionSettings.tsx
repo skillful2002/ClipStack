@@ -70,7 +70,7 @@ export function RetentionSettings() {
           ))}
         </select>
       </div>
-      <button className="sec-btn" disabled={busy} onClick={() => void onPurgeNow()}>
+      <button className="sec-btn outline" disabled={busy} onClick={() => void onPurgeNow()}>
         {t("retention.cleanNow")}
       </button>
     </>

@@ -306,7 +306,7 @@ export function SecuritySettings() {
           {showTouch && <p className="settings-hint">{t("security.useTouchIdHint")}</p>}
           {/* 清除主密码确认/进行中时禁用：避免清除后仍可锁定（无解锁凭据会锁死） */}
           <button
-            className="sec-btn"
+            className="sec-btn outline"
             disabled={busy || confirmClear}
             onClick={() => void onLockNow()}
           >
@@ -334,7 +334,7 @@ export function SecuritySettings() {
           />
           {error && <div className="lock-error">{error}</div>}
           <div className="settings-btn-row">
-            <button className="sec-btn" disabled={busy} onClick={() => void onChangePwd()}>
+            <button className="sec-btn outline" disabled={busy} onClick={() => void onChangePwd()}>
               {t("security.changePassword")}
             </button>
             <button
