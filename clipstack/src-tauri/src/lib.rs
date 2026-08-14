@@ -124,23 +124,31 @@ pub fn run() {
 
             // 启动阶段载入/生成「内部数据库加密密钥」（与主密码无关，始终存在）：
             // 用于数据库内容加密，使无论是否设置主密码、是否锁定，落库数据都保持加密。
-            // 载入失败（如钥匙串暂不可用）时退回明文兼容，不阻断启动。
-            match keychain::load_or_create_internal_key() {
-                Ok(internal) => {
-                    {
-                        let mut kg = db_state.key.lock().expect("key lock poisoned");
-                        *kg = Some(crypto::Key(internal));
+            // 载入失败（如钥匙串暂不可用、主目录不可解析）时退回明文兼容，不阻断启动。
+            // 主目录经 Tauri 跨平台解析（Windows 用 USERPROFILE、macOS/Linux 用 $HOME），
+            // 切勿改用 std::env::var("HOME") —— 该变量在 Windows 原生进程下缺失，
+            // 会致内部密钥加载失败、共享密钥无法落库。
+            match app.path().home_dir() {
+                Ok(home) => match keychain::load_or_create_internal_key(&home) {
+                    Ok(internal) => {
+                        {
+                            let mut kg = db_state.key.lock().expect("key lock poisoned");
+                            *kg = Some(crypto::Key(internal));
+                        }
+                        // 一次性迁移：将启用安全前的明文历史用内部密钥加密；
+                        // 已加密行自动跳过（避免双重加密）。锁顺序遵循「先 key 后 conn」。
+                        let kg = db_state.key.lock().expect("key lock poisoned");
+                        let conn = db_state.conn.lock().expect("db lock poisoned");
+                        if let Some(k) = kg.as_ref() {
+                            let _ = db::migrate_plaintext_to_encrypted(&conn, k);
+                        }
                     }
-                    // 一次性迁移：将启用安全前的明文历史用内部密钥加密；
-                    // 已加密行自动跳过（避免双重加密）。锁顺序遵循「先 key 后 conn」。
-                    let kg = db_state.key.lock().expect("key lock poisoned");
-                    let conn = db_state.conn.lock().expect("db lock poisoned");
-                    if let Some(k) = kg.as_ref() {
-                        let _ = db::migrate_plaintext_to_encrypted(&conn, k);
+                    Err(e) => {
+                        eprintln!("[clipstack] 内部数据库密钥载入失败，数据将以明文兼容模式运行: {e}");
                     }
-                }
+                } // 关闭内层 match（load_or_create_internal_key）
                 Err(e) => {
-                    eprintln!("[clipstack] 内部数据库密钥载入失败，数据将以明文兼容模式运行: {e}");
+                    eprintln!("[clipstack] 无法确定用户主目录，内部密钥载入失败，数据将以明文兼容模式运行: {e}");
                 }
             }
 

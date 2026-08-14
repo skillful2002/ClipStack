@@ -207,9 +207,13 @@ fn write_key_file(path: &std::path::Path, key: &[u8; 32]) -> Result<(), String> 
 /// macOS 优先从文件系统读取（不触发钥匙串、不弹任何系统密码框）；仅在文件不存在时
 /// 尝试从旧版钥匙串迁移（一次性），迁移成功后写入文件系统，后续启动不再触碰钥匙串。
 /// 非 macOS 平台同样使用文件系统（权限 600）。
-pub fn load_or_create_internal_key() -> Result<[u8; 32], String> {
-    let home = std::env::var("HOME").map_err(|_| "无法确定用户主目录".to_string())?;
-    let path = std::path::Path::new(&home).join(".clipstack").join("dbkey.dat");
+///
+/// `home` 为跨平台用户主目录（由调用方经 `app.path().home_dir()` 解析），密钥文件
+/// 落于 `<home>/.clipstack/dbkey.dat`，与数据库（db.rs::open 同目录）保持一致。
+/// 注意：禁止使用 `std::env::var("HOME")` —— Windows 原生进程通常不设置该变量，
+/// 会导致内部密钥加载失败、数据库退化为明文兼容模式、共享密钥无法落库。
+pub fn load_or_create_internal_key(home: &std::path::Path) -> Result<[u8; 32], String> {
+    let path = home.join(".clipstack").join("dbkey.dat");
 
     // 1. 优先从文件系统读取（无钥匙串访问、不弹系统密码框）。
     if let Ok(bytes) = std::fs::read(&path) {

@@ -528,7 +528,16 @@ impl LanManager {
     /// 密钥，**不拆除任何连接、不清空对端名称缓存**。否则每次改动（尤其是文件上限输入框
     /// 的逐字符输入）都会 `stop()` + `start()`，导致：① 正在传输的文件因连接被 tearing
     /// down 而丢失；② `peer_names` 被清空，随后收到的剪贴板来源回退为设备 ID。
-    pub async fn set_config(&self, cfg: LanConfig) -> Result<(), String> {
+    pub async fn set_config(&self, mut cfg: LanConfig) -> Result<(), String> {
+        // 空密钥 = 保持现有密钥（与前端约定一致：密钥字段出于安全不回显，留空即保留）。
+        // 否则打开设置页后失焦/保存会把已落库的密钥覆盖为空，导致每次都要重新输入。
+        // 必须先于「开启共享前置条件」校验执行：已落库密钥时，即便前端传来空密钥也应视为已满足。
+        {
+            let inner = self.inner.lock().await;
+            if cfg.share_key.trim().is_empty() && !inner.config.share_key.is_empty() {
+                cfg.share_key = inner.config.share_key.clone();
+            }
+        }
         // 若要开启共享，必须先配置组 / 密钥 / 端口；缺失则返回错误，且不改动任何状态。
         if cfg.share_out {
             let missing = Self::missing_share_prereqs(&cfg);
