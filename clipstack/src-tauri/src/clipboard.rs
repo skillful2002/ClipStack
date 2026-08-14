@@ -554,63 +554,232 @@ fn luhn_valid(digits: &str) -> bool {
     sum % 10 == 0
 }
 
-/// 启发式识别常见密钥 / Token（不依赖正则依赖，手工匹配主要形态）：
-/// - `sk-` + ≥20 位字母数字（OpenAI 等）
-/// - `ghp_` + 36 位字母数字（GitHub PAT）
-/// - `AKIA` + 16 位大写字母数字（AWS Access Key）
-/// - `xox[baprs]-` + 字母数字 / 连字符（Slack Token）
-/// - `eyJ…` 开头、含 ≥2 个 `.`、整体 base64url（JWT）
+/// 启发式识别常见密钥 / Token：基于已知厂商前缀表（含各大模型、云厂商、Git、Stripe 等）。
+/// 多数前缀对「剩余部分长度 / 字符集」有要求，避免把普通短串误判。
+/// 约定：整串不含空白才进入前缀匹配（密钥不会跨行 / 含空格）。
 fn looks_like_token(s: &str) -> bool {
     if s.chars().any(|c| c.is_whitespace()) {
         return false;
     }
+    // 剩余部分校验：全字母数字 / 字母数字+连字符+下划线
     let alnum = |r: &str| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric());
     let alnum_dash = |r: &str| {
-        !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     };
 
+    // --- OpenAI / DeepSeek 等 sk- 系列（允许连字符，覆盖 sk-proj- / sk-ant-）---
     if let Some(rest) = s.strip_prefix("sk-") {
-        if rest.len() >= 20 && alnum(rest) {
+        if rest.len() >= 20 && alnum_dash(rest) {
             return true;
         }
     }
-    if let Some(rest) = s.strip_prefix("ghp_") {
-        if rest.len() == 36 && alnum(rest) {
+    // Stripe（下划线分隔）
+    if let Some(rest) = s.strip_prefix("sk_live_") {
+        if alnum_dash(rest) {
             return true;
         }
     }
+    if let Some(rest) = s.strip_prefix("sk_test_") {
+        if alnum_dash(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("rk_live_") {
+        if alnum_dash(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("pk_live_") {
+        if alnum_dash(rest) {
+            return true;
+        }
+    }
+    // Anthropic
+    if let Some(rest) = s.strip_prefix("sk-ant-") {
+        if alnum_dash(rest) {
+            return true;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("sk-ant-api03-") {
+        if alnum_dash(rest) {
+            return true;
+        }
+    }
+    // Google Gemini（AIza + 35，共 39 位）
+    if let Some(rest) = s.strip_prefix("AIza") {
+        if s.len() >= 35 && alnum(rest) {
+            return true;
+        }
+    }
+    // GitHub（classic + 各类子令牌 + fine-grained）
+    for p in ["ghp_", "gho_", "ghu_", "ghr_", "ghs_", "ghf_", "github_pat_"] {
+        if let Some(rest) = s.strip_prefix(p) {
+            if alnum_dash(rest) {
+                return true;
+            }
+        }
+    }
+    // AWS Access Key
     if let Some(rest) = s.strip_prefix("AKIA") {
         if rest.len() == 16 && alnum(rest) {
             return true;
         }
     }
-    if let Some(rest) = s.strip_prefix("xox") {
-        if let Some(rest2) = rest.strip_prefix(['b', 'a', 'p', 'r', 's']) {
-            if let Some(rest3) = rest2.strip_prefix('-') {
-                if alnum_dash(rest3) {
-                    return true;
-                }
+    if let Some(rest) = s.strip_prefix("ASIA") {
+        if rest.len() == 16 && alnum(rest) {
+            return true;
+        }
+    }
+    // Slack
+    for p in ["xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-"] {
+        if let Some(rest) = s.strip_prefix(p) {
+            if alnum_dash(rest) {
+                return true;
             }
         }
     }
+    // JWT（eyJ….eyJ….base64url）
     if s.starts_with("eyJ") {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() >= 2
-            && parts
-                .iter()
-                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            && parts.iter().all(|p| {
+                !p.is_empty()
+                    && p.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            })
         {
             return true;
         }
     }
+    // 其它大模型 / 云厂商前缀
+    for p in [
+        "xai-", "gsk_", "pplx-", "sk-or-", "tg-", "r8_", "hf_", "nvapi-", "zp-", "qw-",
+        "mo-", "ve-", "glpat-", "ya29.", "ch-", "ms-", "di-", "as-", "nv-", "fl-", "la-",
+        "sn-", "csk-", "hb-", "nb-", "ns-", "fr-", "vc-", "fw-",
+    ] {
+        if let Some(rest) = s.strip_prefix(p) {
+            if alnum_dash(rest) {
+                return true;
+            }
+        }
+    }
+    // SendGrid（SG.<hash>.<hash>）
+    if s.starts_with("SG.") && s.len() >= 20 && alnum_dash(&s[3..]) {
+        return true;
+    }
     false
 }
 
-/// 密码启发式：长度 ≥ 12、无空白、含 ≥3 种字符类（小写/大写/数字/符号），且经验熵 > 3.0。
-/// 要求「多字符类」可排除仅含单一字符类的长单词（如长英文单词），避免误判正文；
-/// 经验熵兜底确保即便混合了字符类，也需具备足够随机性才判定为密码。
+/// 私钥（PEM 块）识别：命中即敏感。
+fn looks_like_private_key(s: &str) -> bool {
+    s.contains("-----BEGIN") && s.contains("PRIVATE KEY-----")
+}
+
+/// 中国大陆居民身份证（GB 11643-1999，ISO 7064 MOD 11-2 校验）。
+fn looks_like_china_id(s: &str) -> bool {
+    if s.len() != 18 {
+        return false;
+    }
+    let b = s.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        if i < 17 {
+            if !c.is_ascii_digit() {
+                return false;
+            }
+        } else if !(c.is_ascii_digit() || c == b'X' || c == b'x') {
+            return false;
+        }
+    }
+    // 出生日期合理性（年 1900+，月 1–12，日 1–31）降低误判
+    if !valid_id_date(&s[6..14]) {
+        return false;
+    }
+    const W: [u32; 17] = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+    const MAP: [u8; 11] = [b'1', b'0', b'X', b'9', b'8', b'7', b'6', b'5', b'4', b'3', b'2'];
+    let mut sum = 0u32;
+    for i in 0..17 {
+        sum += (b[i] - b'0') as u32 * W[i];
+    }
+    let check = MAP[(sum % 11) as usize];
+    b[17] == check || b[17] == check.to_ascii_lowercase()
+}
+
+/// 身份证出生日期段 YYYYMMDD 合理性检查。
+fn valid_id_date(s: &str) -> bool {
+    if s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let b = s.as_bytes();
+    let year = (b[0] as u32 - b'0' as u32) * 1000
+        + (b[1] as u32 - b'0' as u32) * 100
+        + (b[2] as u32 - b'0' as u32) * 10
+        + (b[3] as u32 - b'0' as u32);
+    let month = (b[4] as u32 - b'0' as u32) * 10 + (b[5] as u32 - b'0' as u32);
+    let day = (b[6] as u32 - b'0' as u32) * 10 + (b[7] as u32 - b'0' as u32);
+    year >= 1900 && year <= 2099 && (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+/// 中国大陆手机号（11 位，1 开头、第二位 3–9）。先清洗非数字再校验。
+fn looks_like_china_mobile(s: &str) -> bool {
+    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() != 11 {
+        return false;
+    }
+    let b = digits.as_bytes();
+    b[0] == b'1' && matches!(b[1], b'3'..=b'9')
+}
+
+/// 银行卡号：整段仅数字 / 空格 / 连字符，去分隔符后长度 13–19，
+/// 首数字为卡组织常见首位（2/3/4/5/6），且通过 Luhn 校验。
+fn looks_like_card(s: &str) -> bool {
+    if !s.chars().all(|c| c.is_ascii_digit() || c == ' ' || c == '-') {
+        return false;
+    }
+    let cleaned: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    if cleaned.len() < 13 || cleaned.len() > 19 {
+        return false;
+    }
+    match cleaned.as_bytes()[0] {
+        b'2' | b'3' | b'4' | b'5' | b'6' => {}
+        _ => return false,
+    }
+    luhn_valid(&cleaned)
+}
+
+/// 是否形如 UUID（8-4-4-4-12，全十六进制）。
+fn looks_like_uuid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 5 {
+        return false;
+    }
+    let lens = [8usize, 4, 4, 4, 12];
+    parts
+        .iter()
+        .zip(lens.iter())
+        .all(|(p, &n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// 是否整串为十六进制（≥16 位，常用于哈希，避免误判为密码）。
+fn is_all_hex(s: &str) -> bool {
+    s.len() >= 16 && !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// 是否形如 URL（含 scheme 或 `://`），避免把链接误判为密码。
+fn looks_like_url(s: &str) -> bool {
+    s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("ftp://")
+        || s.starts_with("www.")
+        || s.contains("://")
+}
+
+/// 密码启发式：长度 ≥ 12、无空白、含 ≥3 种字符类（小写/大写/数字/符号），
+/// 经验熵 ≥ 3.5；并排除 UUID / 纯十六进制 / URL 等常见非密码高熵串，降低误判。
 fn is_strong_password(t: &str) -> bool {
     if t.len() < 12 || t.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+    if looks_like_uuid(t) || is_all_hex(t) || looks_like_url(t) {
         return false;
     }
     let mut classes = 0u8;
@@ -626,35 +795,27 @@ fn is_strong_password(t: &str) -> bool {
     if t.chars().any(|c| !c.is_ascii_alphanumeric()) {
         classes |= 8;
     }
-    classes.count_ones() >= 3 && shannon_entropy(t) > 3.0
+    classes.count_ones() >= 3 && shannon_entropy(t) >= 3.5
 }
 
 /// 敏感内容识别：命中以下任一规则即视为敏感（启用掩码时预览被遮挡，原文仍加密存储）。
-/// - 常见 Token / 密钥形态；
-/// - 整段为纯数字（允许空格/连字符分隔）且通过 Luhn 校验（银行卡号，长度 13–19）；
-/// - 长度 ≥ 12、无空白、含 ≥3 种字符类且经验熵 > 3.0（高随机性密码启发式）。
+/// - 中国大陆居民身份证（MOD 11-2 校验）；
+/// - 中国大陆手机号；
+/// - 银行卡号（Luhn + 卡组织首位）；
+/// - 私钥（PEM）；
+/// - 常见密钥 / Token（各大模型、云厂商、Git、Stripe 等前缀表）；
+/// - 长度 ≥ 12、无空白、含 ≥3 种字符类且经验熵 ≥ 3.5 的高随机性密码（排除 UUID/hex/URL）。
 pub fn is_sensitive(text: &str) -> bool {
     let t = text.trim();
     if t.is_empty() {
         return false;
     }
-    if looks_like_token(t) {
-        return true;
-    }
-    // 卡号：整段只能是数字与分隔符（空格/连字符），去分隔符后做 Luhn 校验。
-    if t.chars()
-        .all(|c| c.is_ascii_digit() || c == ' ' || c == '-')
-    {
-        let cleaned: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
-        if luhn_valid(&cleaned) {
-            return true;
-        }
-    }
-    // 密码启发式：长度 / 多字符类 / 熵三者兼具备。
-    if is_strong_password(t) {
-        return true;
-    }
-    false
+    looks_like_china_id(t)
+        || looks_like_china_mobile(t)
+        || looks_like_private_key(t)
+        || looks_like_token(t)
+        || looks_like_card(t)
+        || is_strong_password(t)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -1263,6 +1424,64 @@ mod tests {
         assert!(!is_strong_password("abcdefghij12"));
         // 小+大+数字（三类）→ 命中
         assert!(is_strong_password("aBcDeF123456"));
+    }
+
+    #[test]
+    fn is_sensitive_detects_china_id() {
+        // GB 11643 示例合法身份证（校验码 X）
+        assert!(is_sensitive("34052419800101001X"));
+        // 校验码错误 → 不命中
+        assert!(!is_sensitive("340524198001010019"));
+        // 普通文本 → 不命中
+        assert!(!is_sensitive("hello123world"));
+    }
+
+    #[test]
+    fn is_sensitive_detects_china_mobile() {
+        assert!(is_sensitive("13800138000"));
+        assert!(is_sensitive("19912345678"));
+        // 第二位为 2 → 不命中
+        assert!(!is_sensitive("12345678901"));
+        // 长度不足 → 不命中
+        assert!(!is_sensitive("138001380"));
+    }
+
+    #[test]
+    fn is_sensitive_detects_private_key() {
+        assert!(is_sensitive(
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+        ));
+        assert!(is_sensitive(
+            "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
+        ));
+    }
+
+    #[test]
+    fn is_sensitive_detects_expanded_tokens() {
+        // Stripe
+        assert!(is_sensitive("sk_live_abc123DEF456ghi789JKL012"));
+        // Anthropic
+        assert!(is_sensitive("sk-ant-api03-abcdefghijklmnopqrstuvwx"));
+        // Google Gemini（AIza + 35）
+        assert!(is_sensitive(&format!("AIza{}", "a".repeat(35))));
+        // xAI
+        assert!(is_sensitive("xai-1234567890abcdefghijklmnop"));
+        // Zhipu
+        assert!(is_sensitive(&format!("zp-{}", "a".repeat(30))));
+        // GitHub fine-grained
+        assert!(is_sensitive(
+            "github_pat_abcdefghijklmnopqrstuvwxyz0123456789"
+        ));
+    }
+
+    #[test]
+    fn is_sensitive_rejects_uuid_and_hex() {
+        // UUID 不应被判为密码
+        assert!(!is_sensitive("123e4567-e89b-12d3-a456-426614174000"));
+        // 纯十六进制哈希不应判为密码
+        assert!(!is_sensitive(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        ));
     }
 
     #[test]

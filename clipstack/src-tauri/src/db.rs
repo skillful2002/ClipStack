@@ -31,18 +31,18 @@ fn mask_sensitive_read(
     mask_on: bool,
 ) -> (String, String, bool) {
     let plain = open_text(key, raw);
-    let sensitive = mask_on
-        && matches!(
-            content_type,
-            ContentType::Text | ContentType::Link | ContentType::Code
-        )
-        && is_sensitive(&plain);
-    let preview = if sensitive {
+    // 读取时实时重算「是否敏感」：不依赖捕获时落库的旧值，历史条目也能随规则更新即时修正。
+    let detected = matches!(
+        content_type,
+        ContentType::Text | ContentType::Link | ContentType::Code
+    ) && is_sensitive(&plain);
+    // 掩码仅在开关开启且命中敏感时生效；detection 本身与开关无关，直接作为 is_sensitive 返回。
+    let preview = if mask_on && detected {
         SENSITIVE_MASK.to_string()
     } else {
         plain.clone()
     };
-    (plain, preview, sensitive)
+    (plain, preview, detected)
 }
 
 /// 历史条目容量上限：超出后自动硬删最旧部分（不进回收站，避免回收站无限增长）。
