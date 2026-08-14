@@ -1,6 +1,6 @@
 // P3 · 中间主列表：时间筛选标签 + 按日分组的历史条目。
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useHistory, filterItems, type TimeFilter } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { dayLabel } from "../lib/format";
@@ -33,6 +33,12 @@ export function HistoryList() {
     () => filterItems(items, category, timeFilter, search, sourceFilter),
     [items, category, timeFilter, search, sourceFilter],
   );
+
+  // 中间列表数据发生变化时，始终选中第一行（空列表则取消选中）。
+  useEffect(() => {
+    const firstId = filtered[0]?.id ?? null;
+    if (useHistory.getState().selectedId !== firstId) select(firstId);
+  }, [filtered, select]);
 
   // 按日分组（保持置顶优先、时间倒序的既有顺序）。
   const groups = useMemo(() => {
