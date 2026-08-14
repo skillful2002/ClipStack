@@ -270,7 +270,7 @@ export function SecuritySettings() {
           )}
           {showTouch && <p className="settings-hint">{t("security.useTouchIdHint")}</p>}
           {error && <div className="lock-error">{error}</div>}
-          <button className="sec-btn" disabled={busy} onClick={() => void onSetup()}>
+          <button className="sec-btn outline" disabled={busy} onClick={() => void onSetup()}>
             {t("security.setPassword")}
           </button>
         </div>
