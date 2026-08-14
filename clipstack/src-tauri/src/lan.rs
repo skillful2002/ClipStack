@@ -1834,7 +1834,9 @@ fn share_month_dir(home: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// 计算共享目录下的不冲突顶层名（文件或目录）：若 `dir/name` 已存在或已在本批次占用，
-/// 则按 `name-1` / `name-2` 顺序寻找未占用名。`used` 跨本批次条目共享，避免同包内重复分配。
+/// 则按 `name-(1)` / `name-(2)` 顺序寻找未占用名。有扩展名的文件，序号加在「后缀之前」
+/// （如 `report-(1).pdf`）；无扩展名（目录或裸文件名）则加在末尾（如 `folder-(1)`）。
+/// `used` 跨本批次条目共享，避免同包内重复分配。
 fn unique_share_name(
     dir: &std::path::Path,
     name: &str,
@@ -1845,9 +1847,21 @@ fn unique_share_name(
         return name.to_string();
     }
     used.remove(name); // 上面仅当已存在时才可能误插入，撤销
+
+    let path = std::path::Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name)
+        .to_string();
+    let ext = path.extension().and_then(|s| s.to_str());
+
     let mut n: u32 = 1;
     loop {
-        let cand_name = format!("{name}-{n}");
+        let cand_name = match ext {
+            Some(e) => format!("{stem}-({n}).{e}"),
+            None => format!("{stem}-({n})"),
+        };
         let cand = dir.join(&cand_name);
         if !cand.exists() && used.insert(cand_name.clone()) {
             return cand_name;
