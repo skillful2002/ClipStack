@@ -153,6 +153,10 @@
 }
 
 .nav-count {
+  flex-shrink: 0;
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--cs-text-tertiary);
 }
