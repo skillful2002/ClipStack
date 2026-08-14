@@ -536,7 +536,7 @@
   background: var(--cs-bg-subtle);
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 16px 16px 8px;
   gap: 14px;
   overflow-y: auto;
 }
@@ -593,6 +593,13 @@
 .preview-text.code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+/* 语法高亮（highlight.js / github-dark 主题）融入详情容器：
+   透明背景、去掉主题自带内边距，仅保留 token 颜色。 */
+.preview-text.code.hljs {
+  background: transparent;
+  padding: 0;
 }
 
 .preview-image-placeholder {
@@ -712,6 +719,7 @@
 .detail-actions {
   display: flex;
   flex-wrap: nowrap;
+  justify-content: center;
   gap: 6px;
   margin-top: auto;
 }
@@ -722,7 +730,7 @@
   gap: 6px;
   flex: 0 1 auto;
   white-space: nowrap;
-  padding: 8px 10px;
+  padding: 8px;
   border: 1px solid var(--cs-border);
   border-radius: var(--cs-radius-md);
   background: var(--cs-bg);
@@ -739,23 +747,8 @@
   background: var(--cs-bg-hover);
 }
 
-.detail-actions button.primary {
-  background: var(--cs-accent-strong, var(--cs-accent, #4c6ef5));
-  color: #fff;
-  border-color: var(--cs-accent-strong, var(--cs-accent, #4c6ef5));
-}
-
-.detail-actions button.primary:hover {
-  filter: brightness(0.95);
-}
-
 .detail-actions button.danger {
   color: #dc2626;
-  border-color: #fca5a5;
-}
-
-.detail-actions button.danger:hover {
-  background: #fef2f2;
 }
 
 /* ===== 设置 / 回收站 ===== */

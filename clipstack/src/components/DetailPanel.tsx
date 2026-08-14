@@ -1,19 +1,35 @@
 // P3 · 右侧详情面板：类型标签、内容预览、元数据、操作区。
 // P8 · 图片预览：选中图片时按 id 拉取 PNG 二进制，生成对象 URL 渲染 <img>。
 
-import { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { useEffect, useState, useRef, useLayoutEffect, useMemo } from "react";
 import { useHistory } from "../store/history";
 import { useItemActions } from "../lib/actions";
 import { getItemBlob } from "../lib/tauri";
 import { TYPE_META, formatBytes, fullDateTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { ACTION_SHORTCUTS } from "../lib/shortcuts";
-import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon } from "./icons";
+import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon, ExternalLinkIcon } from "./icons";
+import hljs from "highlight.js/lib/common";
+import "highlight.js/styles/github-dark.css";
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export function DetailPanel() {
   const t = useT();
   const item = useHistory((s) => s.items.find((i) => i.id === s.selectedId) ?? null);
-  const { copy, pin, fav, del } = useItemActions();
+  const { copy, pin, fav, del, save, open } = useItemActions();
+
+  // 代码详情：用 highlight.js 自动识别语言并生成带颜色的 HTML。
+  // 必须置于 early return 之前，保证每次渲染 hook 调用顺序一致。
+  const codeHtml = useMemo(() => {
+    if (item?.contentType !== "code") return "";
+    try {
+      return hljs.highlightAuto(item.contentText ?? "").value;
+    } catch {
+      return escapeHtml(item.contentText ?? "");
+    }
+  }, [item?.contentType, item?.contentText]);
 
   // 详情面板宽度随「当前语言的操作按钮实际宽度」自适应：中文窄、法文宽，
   // 既不换行也不截断，也不在非中文下留过多空白。
@@ -146,8 +162,13 @@ export function DetailPanel() {
             {item.preview}
             <span className="sensitive-note">{t("detail.sensitiveMasked")}</span>
           </div>
+        ) : isCode ? (
+          <div
+            className="preview-text code hljs"
+            dangerouslySetInnerHTML={{ __html: codeHtml }}
+          />
         ) : (
-          <div className={`preview-text${isCode ? " code" : ""}`}>{item.contentText}</div>
+          <div className="preview-text">{item.contentText}</div>
         )}
       </div>
 
@@ -175,21 +196,27 @@ export function DetailPanel() {
       </div>
 
       <div className="detail-actions" ref={actionsRef}>
-        <button className="primary" onClick={() => copy(item)}>
-          <CopyIcon size={15} /> {t("action.copy")}
-          <span className="btn-shortcut">{ACTION_SHORTCUTS.copy}</span>
+        {(item.contentType === "image" || item.contentType === "file") && (
+          <button onClick={() => save(item)} title={t("action.save")}>
+            <SaveIcon size={16} />
+          </button>
+        )}
+        {item.contentType === "link" && (
+          <button onClick={() => open(item)} title={t("action.open")}>
+            <ExternalLinkIcon size={16} />
+          </button>
+        )}
+        <button className="primary" onClick={() => copy(item)} title={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`}>
+          <CopyIcon size={16} />
         </button>
-        <button onClick={() => pin(item)}>
-          <PinIcon size={15} active={item.isPinned} /> {item.isPinned ? t("action.unpin") : t("action.pin")}
-          <span className="btn-shortcut">{ACTION_SHORTCUTS.pin}</span>
+        <button onClick={() => pin(item)} title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`}>
+          <PinIcon size={16} active={item.isPinned} />
         </button>
-        <button onClick={() => fav(item)}>
-          <StarIcon size={15} active={item.isFavorite} /> {item.isFavorite ? t("action.unfav") : t("action.fav")}
-          <span className="btn-shortcut">{ACTION_SHORTCUTS.fav}</span>
+        <button onClick={() => fav(item)} title={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`}>
+          <StarIcon size={16} active={item.isFavorite} />
         </button>
-        <button className="danger" onClick={() => del(item)}>
-          <TrashIcon size={15} /> {t("action.delete")}
-          <span className="btn-shortcut">{ACTION_SHORTCUTS.del}</span>
+        <button className="danger" onClick={() => del(item)} title={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`}>
+          <TrashIcon size={16} />
         </button>
       </div>
 
