@@ -37,7 +37,7 @@ export function HistoryList() {
   const setFilterDate = useHistory((s) => s.setFilterDate);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
-  const { copy, pin, fav, del, save, clearFiltered } = useItemActions();
+  const { copy, pin, fav, del, save, open, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
@@ -127,6 +127,7 @@ export function HistoryList() {
                   onPin={pin}
                   onFav={fav}
                   onDelete={del}
+                  onOpen={open}
                 />
               ))}
             </div>

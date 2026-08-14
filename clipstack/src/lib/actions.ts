@@ -4,6 +4,7 @@ import { useHistory } from "../store/history";
 import * as api from "./tauri";
 import { useT } from "./i18n";
 import { save as dialogSave, open as dialogOpen } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { HistoryItem } from "../types";
 
 export function useItemActions() {
@@ -147,5 +148,17 @@ export function useItemActions() {
     }
   };
 
-  return { copy, save, pin, fav, del, restore, purge, emptyTrash, clearFiltered };
+  // 用系统默认浏览器打开链接类型条目的 URL。
+  const open = async (item: HistoryItem) => {
+    try {
+      const u = /^[a-z][a-z0-9+.-]*:\/\//i.test(item.contentText)
+        ? item.contentText
+        : `https://${item.contentText}`;
+      await openUrl(u);
+    } catch (e) {
+      setToast(t("toast.opFailed", { error: String(e) }));
+    }
+  };
+
+  return { copy, save, pin, fav, del, open, restore, purge, emptyTrash, clearFiltered };
 }

@@ -4,7 +4,7 @@ import type { HistoryItem } from "../types";
 import { TYPE_META, relativeTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { ACTION_SHORTCUTS } from "../lib/shortcuts";
-import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon } from "./icons";
+import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon, ExternalLinkIcon } from "./icons";
 
 interface Props {
   item: HistoryItem;
@@ -15,6 +15,7 @@ interface Props {
   onPin: (item: HistoryItem) => void;
   onFav: (item: HistoryItem) => void;
   onDelete: (item: HistoryItem) => void;
+  onOpen: (item: HistoryItem) => void;
 }
 
 export function HistoryItemRow({
@@ -26,6 +27,7 @@ export function HistoryItemRow({
   onPin,
   onFav,
   onDelete,
+  onOpen,
 }: Props) {
   const t = useT();
   const meta = TYPE_META[item.contentType];
@@ -74,6 +76,11 @@ export function HistoryItemRow({
         {(item.contentType === "image" || item.contentType === "file") && (
           <button title={t("action.save")} onClick={() => onSave(item)}>
             <SaveIcon size={15} />
+          </button>
+        )}
+        {item.contentType === "link" && (
+          <button title={t("action.open")} onClick={() => onOpen(item)}>
+            <ExternalLinkIcon size={15} />
           </button>
         )}
         <button title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`} onClick={() => onPin(item)}>

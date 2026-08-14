@@ -45,6 +45,7 @@ const zhCN: Dict = {
   "item.unknownSource": "未知来源",
 
   "action.copy": "复制",
+  "action.open": "打开链接",
   "action.save": "另存为",
   "action.pin": "置顶",
   "action.unpin": "取消置顶",
@@ -364,6 +365,7 @@ const zhTW: Dict = {
   "item.unknownSource": "未知來源",
 
   "action.copy": "複製",
+  "action.open": "打開連結",
   "action.save": "另存為",
   "action.pin": "置頂",
   "action.unpin": "取消置頂",
@@ -683,6 +685,7 @@ const en: Dict = {
   "item.unknownSource": "Unknown source",
 
   "action.copy": "Copy",
+  "action.open": "Open in browser",
   "action.save": "Save As",
   "action.pin": "Pin",
   "action.unpin": "Unpin",
@@ -1002,6 +1005,7 @@ const ja: Dict = {
   "item.unknownSource": "不明なソース",
 
   "action.copy": "コピー",
+  "action.open": "ブラウザで開く",
   "action.save": "名前を付けて保存",
   "action.pin": "ピン留め",
   "action.unpin": "ピン留め解除",
@@ -1321,6 +1325,7 @@ const de: Dict = {
   "item.unknownSource": "Unbekannte Quelle",
 
   "action.copy": "Kopieren",
+  "action.open": "Im Browser öffnen",
   "action.save": "Speichern unter",
   "action.pin": "Anheften",
   "action.unpin": "Loslösen",
@@ -1640,6 +1645,7 @@ const fr: Dict = {
   "item.unknownSource": "Source inconnue",
 
   "action.copy": "Copier",
+  "action.open": "Ouvrir dans le navigateur",
   "action.save": "Enregistrer sous",
   "action.pin": "Épingler",
   "action.unpin": "Désépingler",
