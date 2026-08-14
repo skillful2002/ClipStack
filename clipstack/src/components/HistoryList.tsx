@@ -23,14 +23,15 @@ export function HistoryList() {
   const timeFilter = useHistory((s) => s.timeFilter);
   const setTimeFilter = useHistory((s) => s.setTimeFilter);
   const search = useHistory((s) => s.search);
+  const sourceFilter = useHistory((s) => s.sourceFilter);
   const selectedId = useHistory((s) => s.selectedId);
   const select = useHistory((s) => s.select);
   const { copy, pin, fav, del, save, clearFiltered } = useItemActions();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filtered = useMemo(
-    () => filterItems(items, category, timeFilter, search),
-    [items, category, timeFilter, search],
+    () => filterItems(items, category, timeFilter, search, sourceFilter),
+    [items, category, timeFilter, search, sourceFilter],
   );
 
   // 按日分组（保持置顶优先、时间倒序的既有顺序）。

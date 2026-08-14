@@ -1,6 +1,6 @@
 // P3 · 左侧边栏：搜索、分类导航、回收站 / 设置入口。
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useHistory, type Category } from "../store/history";
 import type { ContentType } from "../types";
 import { TYPE_META } from "../lib/format";
@@ -15,6 +15,8 @@ import {
   HelpIcon,
   AllIcon,
   MainWindowIcon,
+  SourceIcon,
+  ClearIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -33,9 +35,12 @@ export function Sidebar() {
   const setCategory = useHistory((s) => s.setCategory);
   const search = useHistory((s) => s.search);
   const setSearch = useHistory((s) => s.setSearch);
+  const sourceFilter = useHistory((s) => s.sourceFilter);
+  const setSourceFilter = useHistory((s) => s.setSourceFilter);
   const view = useHistory((s) => s.view);
   const setView = useHistory((s) => s.setView);
   const hasUpdate = useHistory((s) => s.updateInfo?.hasUpdate ?? false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -43,8 +48,43 @@ export function Sidebar() {
     return c;
   }, [items]);
 
+  // 最常见的 5 个来源：数量降序；数量相同按最后剪切时间（createdAt）倒序。
+  // 按当前所选分类（类型）限定用于统计来源的数据范围：
+  // 「全部」用全量 items，否则只用该 content type 的条目。
+  const scopedItems = useMemo(
+    () => (category === "all" ? items : items.filter((i) => i.contentType === category)),
+    [items, category],
+  );
+
+  // 空来源（未知）以空串为 key，显示时回落到「未知来源」文案。
+  const topSources = useMemo(() => {
+    const map = new Map<string, { count: number; last: number }>();
+    for (const it of scopedItems) {
+      const key = it.sourceApp || "";
+      const e = map.get(key) ?? { count: 0, last: 0 };
+      e.count += 1;
+      e.last = Math.max(e.last, it.createdAt);
+      map.set(key, e);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].count - a[1].count || b[1].last - a[1].last)
+      .slice(0, 8)
+      .map(([key]) => key);
+  }, [scopedItems]);
+
+  // 各来源数量，供来源项徽标使用。
+  const sourceCounts = useMemo(() => {
+    const c: Record<string, number> = { "": 0 };
+    for (const it of scopedItems) c[it.sourceApp || ""] = (c[it.sourceApp || ""] ?? 0) + 1;
+    return c;
+  }, [scopedItems]);
+
   const categoryLabel = (cat: (typeof CATEGORIES)[number]): string =>
     cat.key === "all" ? t("sidebar.all") : t(`type.${cat.type}`);
+
+  // 来源项的显示文案：空串（未知来源）回落到对应文案。
+  const sourceLabel = (key: string): string =>
+    key === "" ? t("item.unknownSource") : key;
 
   return (
     <aside className="sidebar">
@@ -52,13 +92,29 @@ export function Sidebar() {
         <SearchIcon size={15} />
         <input
           id="clipstack-search"
+          ref={searchRef}
           type="text"
           placeholder={t("sidebar.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label={t("sidebar.searchAria")}
         />
-        <span className="search-shortcut">{NAV_SHORTCUTS.search}</span>
+        {search ? (
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => {
+              setSearch("");
+              searchRef.current?.focus();
+            }}
+            aria-label={t("sidebar.searchClear")}
+            title={t("sidebar.searchClear")}
+          >
+            <ClearIcon size={13} />
+          </button>
+        ) : (
+          <span className="search-shortcut">{NAV_SHORTCUTS.search}</span>
+        )}
       </div>
 
       <nav className="sidebar-nav">
@@ -77,6 +133,26 @@ export function Sidebar() {
             <span className="nav-label">{categoryLabel(cat)}</span>
             <span className="nav-shortcut">{NAV_SHORTCUTS[cat.key]}</span>
             <span className="nav-count">{counts[cat.key] ?? 0}</span>
+          </button>
+        ))}
+
+        {topSources.length > 0 && <div className="nav-divider" />}
+
+        {topSources.map((key) => (
+          <button
+            key={key}
+            className={`nav-item nav-subitem${sourceFilter === key ? " active" : ""}`}
+            onClick={() => {
+              setSourceFilter(sourceFilter === key ? null : key);
+              setView("main");
+            }}
+            title={sourceLabel(key)}
+          >
+            <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+              <SourceIcon size={16} />
+            </span>
+            <span className="nav-label">{sourceLabel(key)}</span>
+            <span className="nav-count">{sourceCounts[key] ?? 0}</span>
           </button>
         ))}
       </nav>

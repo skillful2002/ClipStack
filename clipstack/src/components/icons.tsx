@@ -193,3 +193,23 @@ export function HelpIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/** 来源（应用 / 出处）：层叠方块，表示内容来源。 */
+export function SourceIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3 3 8l9 5 9-5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </svg>
+  );
+}
+
+/** 清除（叉号）：用于搜索框一键清空。 */
+export function ClearIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
+}

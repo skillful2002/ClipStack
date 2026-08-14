@@ -8,6 +8,7 @@ type Dict = Record<string, string>;
 const zhCN: Dict = {
   "sidebar.searchPlaceholder": "搜索剪贴板内容…",
   "sidebar.searchAria": "搜索",
+  "sidebar.searchClear": "清除搜索",
   "sidebar.all": "全部",
   "sidebar.main": "主界面",
   "sidebar.trash": "回收站",
@@ -323,6 +324,7 @@ const zhCN: Dict = {
 const zhTW: Dict = {
   "sidebar.searchPlaceholder": "搜尋剪貼簿內容…",
   "sidebar.searchAria": "搜尋",
+  "sidebar.searchClear": "清除搜尋",
   "sidebar.all": "全部",
   "sidebar.main": "主介面",
   "sidebar.trash": "資源回收筒",
@@ -638,6 +640,7 @@ const zhTW: Dict = {
 const en: Dict = {
   "sidebar.searchPlaceholder": "Search clipboard…",
   "sidebar.searchAria": "Search",
+  "sidebar.searchClear": "Clear search",
   "sidebar.all": "All",
   "sidebar.main": "Main",
   "sidebar.trash": "Trash",
@@ -953,6 +956,7 @@ const en: Dict = {
 const ja: Dict = {
   "sidebar.searchPlaceholder": "クリップボードを検索…",
   "sidebar.searchAria": "検索",
+  "sidebar.searchClear": "検索をクリア",
   "sidebar.all": "すべて",
   "sidebar.main": "メイン",
   "sidebar.trash": "ゴミ箱",
@@ -1268,6 +1272,7 @@ const ja: Dict = {
 const de: Dict = {
   "sidebar.searchPlaceholder": "Zwischenablage suchen…",
   "sidebar.searchAria": "Suchen",
+  "sidebar.searchClear": "Suche löschen",
   "sidebar.all": "Alle",
   "sidebar.main": "Startseite",
   "sidebar.trash": "Papierkorb",
@@ -1583,6 +1588,7 @@ const de: Dict = {
 const fr: Dict = {
   "sidebar.searchPlaceholder": "Rechercher dans le presse-papiers…",
   "sidebar.searchAria": "Rechercher",
+  "sidebar.searchClear": "Effacer la recherche",
   "sidebar.all": "Tout",
   "sidebar.main": "Accueil",
   "sidebar.trash": "Corbeille",

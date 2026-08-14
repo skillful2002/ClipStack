@@ -21,6 +21,8 @@ interface HistoryState {
   category: Category;
   timeFilter: TimeFilter;
   search: string;
+  /** 按来源应用过滤（null 表示不过滤；空串 "" 表示「未知来源」）。 */
+  sourceFilter: string | null;
   view: View;
   loading: boolean;
   error: string | null;
@@ -48,6 +50,7 @@ interface HistoryState {
   setCategory: (c: Category) => void;
   setTimeFilter: (t: TimeFilter) => void;
   setSearch: (s: string) => void;
+  setSourceFilter: (s: string | null) => void;
   setView: (v: View) => void;
   /** 实时事件：新条目到达（同 id 替换，否则前置）。 */
   prepend: (item: HistoryItem) => void;
@@ -72,6 +75,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   category: "all",
   timeFilter: "all",
   search: "",
+  sourceFilter: null,
   view: "main",
   loading: false,
   error: null,
@@ -149,9 +153,10 @@ export const useHistory = create<HistoryState>((set, get) => ({
   selectTrash: (id) => set({ selectedTrashId: id }),
   setTrashItems: (items) =>
     set({ trashItems: items, selectedTrashId: items[0]?.id ?? null }),
-  setCategory: (category) => set({ category }),
+  setCategory: (category) => set({ category, sourceFilter: null }),
   setTimeFilter: (timeFilter) => set({ timeFilter }),
   setSearch: (search) => set({ search }),
+  setSourceFilter: (sourceFilter) => set({ sourceFilter }),
   setView: (view) => set({ view }),
   setToast: (toast) => set({ toast }),
   setUpdateInfo: (updateInfo) => set({ updateInfo }),
@@ -192,12 +197,13 @@ export const useHistory = create<HistoryState>((set, get) => ({
   },
 }));
 
-/** 纯函数：按分类 / 时间 / 搜索过滤（不改变顺序，由调用方渲染）。 */
+/** 纯函数：按分类 / 时间 / 搜索 / 来源过滤（不改变顺序，由调用方渲染）。 */
 export function filterItems(
   items: HistoryItem[],
   category: Category,
   timeFilter: TimeFilter,
   search: string,
+  sourceFilter: string | null = null,
 ): HistoryItem[] {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -218,6 +224,9 @@ export function filterItems(
         return false;
       if (timeFilter === "week" && t < startOfWeek) return false;
     }
+
+    // 按来源过滤：sourceFilter 为 null 时不过滤；空串代表「未知来源」。
+    if (sourceFilter !== null && it.sourceApp !== sourceFilter) return false;
 
     if (q) {
       const hay = `${it.preview} ${it.contentText} ${it.sourceApp}`.toLowerCase();

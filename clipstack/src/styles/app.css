@@ -57,6 +57,36 @@
   pointer-events: none;
 }
 
+/* 搜索框清除按钮（有内容时替换快捷键提示显示）。 */
+.search-clear {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--cs-bg-secondary, rgba(128, 128, 128, 0.12));
+  color: var(--cs-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  background: var(--cs-bg-hover);
+  color: var(--cs-text-primary);
+}
+
+.search-clear:focus-visible {
+  outline: 2px solid var(--cs-accent);
+  outline-offset: 1px;
+}
+
 .sidebar-nav {
   flex: 1;
   display: flex;
@@ -72,6 +102,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* 分类列表与「来源」分组之间的分隔横线（紧贴「文件」之后）。 */
+.nav-divider {
+  height: 0;
+  border-top: 1px solid var(--cs-border);
+  margin: 4px 14px;
+}
+
+/* 「来源」子项：左缩进与「文件」等分类项对齐（图标同列），以横线区分归属。 */
+.nav-subitem {
+  padding-left: 10px;
+  font-size: 13px;
 }
 
 .nav-item {
