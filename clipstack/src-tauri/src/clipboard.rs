@@ -1458,19 +1458,21 @@ mod tests {
 
     #[test]
     fn is_sensitive_detects_expanded_tokens() {
+        // 以下均为占位样例（非真实密钥），仅用于验证各厂商 token 前缀识别逻辑，
+        // 避免代码仓库中出现形似真实 API 密钥的字符串（触发密钥扫描告警）。
         // Stripe
-        assert!(is_sensitive("sk_live_abc123DEF456ghi789JKL012"));
+        assert!(is_sensitive("sk_live_xxxxxxxxxxxx"));
         // Anthropic
-        assert!(is_sensitive("sk-ant-api03-abcdefghijklmnopqrstuvwx"));
-        // Google Gemini（AIza + 35）
-        assert!(is_sensitive(&format!("AIza{}", "a".repeat(35))));
+        assert!(is_sensitive("sk-ant-api03-xxxxxxxxxxxxxxxxxxxx"));
+        // Google Gemini（AIza + 35，共 39 位）
+        assert!(is_sensitive(&format!("AIza{}", "x".repeat(35))));
         // xAI
-        assert!(is_sensitive("xai-1234567890abcdefghijklmnop"));
+        assert!(is_sensitive("xai-xxxxxxxxxxxxxxxxxxxx"));
         // Zhipu
-        assert!(is_sensitive(&format!("zp-{}", "a".repeat(30))));
+        assert!(is_sensitive(&format!("zp-{}", "x".repeat(30))));
         // GitHub fine-grained
         assert!(is_sensitive(
-            "github_pat_abcdefghijklmnopqrstuvwxyz0123456789"
+            "github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxx"
         ));
     }
 
