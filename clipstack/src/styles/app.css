@@ -1744,6 +1744,11 @@
   margin-top: -18px;
 }
 
+/* 局域网共享卡内、共享开关之后内嵌的在线设备区 */
+.lan-online-devices {
+  margin-bottom: 8px;
+}
+
 .lan-device-id {
   font-family: var(--cs-mono, ui-monospace, "SF Mono", Menlo, monospace);
   font-size: 12px;

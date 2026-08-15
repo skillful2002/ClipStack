@@ -248,6 +248,34 @@ export function LanSettings() {
         </div>
         <p className="settings-hint">{t("lan.shareOutHint")}</p>
 
+        {/* 在线设备：位于「共享本机剪贴板」开关之后、「共享组」之前，始终显示 */}
+        <div className="lan-online-devices">
+          <div className="settings-subtitle">{t("lan.onlineDevices")}</div>
+          <div className="settings-list">
+            {/* 本机置顶：确认本机在线与共享状态（本机不进入远端连接列表） */}
+            <div className="settings-list-item lan-self">
+              <span className="item-name">{name || t("lan.thisDevice")}</span>
+              <span className={`lan-self-status${shareOut ? " on" : ""}`}>
+                {shareOut ? t("lan.sharing") : t("lan.shareStopped")}
+              </span>
+            </div>
+            {peers.map((p) => (
+              <div key={p.deviceId} className="settings-list-item">
+                <span className="item-name">
+                  {p.name || p.deviceId}
+                  <span className="lan-peer-addr"> {p.addr}</span>
+                </span>
+                <span className={`lan-peer-status${p.connected ? " on" : ""}`}>
+                  {p.connected ? "●" : "○"}
+                </span>
+              </div>
+            ))}
+          </div>
+          {peers.length === 0 && (
+            <p className="settings-hint lan-no-others">{t("lan.noOtherPeers")}</p>
+          )}
+        </div>
+
         <div className="settings-row">
           <span>{t("lan.group")}</span>
           <input
@@ -422,33 +450,6 @@ export function LanSettings() {
             {t("lan.clearShareFiles")}
           </button>
         </div>
-      </div>
-
-      <div className="settings-card">
-        <div className="settings-card-title lan-subtitle">{t("lan.onlineDevices")}</div>
-        <div className="settings-list">
-          {/* 本机置顶：确认本机在线与共享状态（本机不进入远端连接列表） */}
-          <div className="settings-list-item lan-self">
-            <span className="item-name">{name || t("lan.thisDevice")}</span>
-            <span className={`lan-self-status${shareOut ? " on" : ""}`}>
-              {shareOut ? t("lan.sharing") : t("lan.shareStopped")}
-            </span>
-          </div>
-          {peers.map((p) => (
-            <div key={p.deviceId} className="settings-list-item">
-              <span className="item-name">
-                {p.name || p.deviceId}
-                <span className="lan-peer-addr"> {p.addr}</span>
-              </span>
-              <span className={`lan-peer-status${p.connected ? " on" : ""}`}>
-                {p.connected ? "●" : "○"}
-              </span>
-            </div>
-          ))}
-        </div>
-        {peers.length === 0 && (
-          <p className="settings-hint lan-no-others">{t("lan.noOtherPeers")}</p>
-        )}
       </div>
 
       {showClearConfirm && (
