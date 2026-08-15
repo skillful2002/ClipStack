@@ -250,6 +250,10 @@ struct Inner {
     known_peers: HashMap<String, SocketAddr>,
     /// 已知对端名称（device_id -> 友好名），来源 mDNS TXT 或握手 hello，用于共享列表展示。
     peer_names: HashMap<String, String>,
+    /// 已知对端广播携带的本机 IP（device_id -> IP 字符串），来源 mDNS TXT 的 `ip` 字段。
+    /// 用于「机器名 + IP」在线列表去重：优先取此广播地址（避免 `.local` 域名解析差异），
+    /// 缺失时回退连接对端地址。
+    peer_ips: HashMap<String, String>,
     /// 网络栈代际计数：每次 start()（含 stop+start 重启）递增，stop() 也会递增。连接的读任务在
     /// spawn 时捕获自己的代际；读任务在 register_conn（把对端插入 conns）前检查代际是否仍有效，
     /// 失效则跳过登记——从而避免 stop 清空 conns 后、协作式取消的读任务又把对端插回、污染
@@ -300,6 +304,7 @@ impl LanManager {
                 client_stops: HashMap::new(),
                 known_peers: HashMap::new(),
                 peer_names: HashMap::new(),
+                peer_ips: HashMap::new(),
                 conn_aborts: HashMap::new(),
                 gen: 0,
                 peer_fullnames: HashMap::new(),
@@ -393,6 +398,10 @@ impl LanManager {
         props.insert("name".into(), inner.config.device_name.clone());
         props.insert("version".into(), APP_VERSION.into());
         props.insert("group_fp".into(), fp);
+        // 本机出口 IP 也写入 TXT，便于对端「机器名 + IP」去重，并在 `.local` 域名
+        // 解析不可靠的网络下提供直接可达地址（不影响现有连接路径）。
+        let local_ip_str = local_ip.map(|i| i.to_string()).unwrap_or_default();
+        props.insert("ip".into(), local_ip_str);
         let info = match ServiceInfo::new(SERVICE_TYPE, &instance, &host, ip_arg, inner.config.listen_port, props) {
             Ok(i) => i,
             Err(e) => {
@@ -701,27 +710,41 @@ impl LanManager {
     /// 当前在线设备列表。
     pub async fn peers(&self) -> Vec<PeerInfo> {
         let inner = self.inner.lock().await;
-        inner
-            .conns
-            .values()
-            .map(|h| {
-                let name = inner
-                    .peer_names
-                    .get(&h.device_id)
-                    .cloned()
-                    .unwrap_or_else(|| h.device_id.clone());
-                PeerInfo {
-                    device_id: h.device_id.clone(),
-                    name: name.clone(),
-                    addr: String::new(),
-                    connected: true,
-                }
-            })
+        // 展示层去重：按「机器名 + IP」合并，确保同一台物理机器（可能因 device_id 重生成 /
+        // 网络波动短暂并存多个连接）在在线列表中只出现一次。底层 WebSocket 连接仍各自独立
+        // 基于 device_id 管理，此处仅合并对外展示，不影响建立的连接与断线检测。
+        let mut seen: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for h in inner.conns.values() {
+            // 设备 IP：优先用连接登记的 IP（广播 IP 优先），缺失时回退查询对端广播 IP。
+            let ip = if h.addr.is_empty() {
+                inner.peer_ips.get(&h.device_id).cloned().unwrap_or_default()
+            } else {
+                h.addr.clone()
+            };
+            let name = inner
+                .peer_names
+                .get(&h.device_id)
+                .cloned()
+                .unwrap_or_else(|| h.device_id.clone());
             // 防御性过滤：排除无有效主机名的条目（name 为空或回退为 device_id）。
             // 这些是 stale mDNS / 未完成握手的幽灵连接，不应展示给用户。
-            // 上游（mDNS 层 + register_conn）已拦截大部分，此处为最终安全网。
-            .filter(|p| !p.name.is_empty() && p.name != p.device_id)
-            .collect()
+            if name.is_empty() || name == h.device_id {
+                continue;
+            }
+            // 「机器名 + IP」去重：同 (name, ip) 只保留首条，避免同机多连接重复展示。
+            if !seen.insert((name.clone(), ip.clone())) {
+                continue;
+            }
+            out.push(PeerInfo {
+                device_id: h.device_id.clone(),
+                name,
+                addr: ip,
+                connected: true,
+            });
+        }
+        out
     }
 
     /// L3 · 切换发布开关（不影响 mDNS 指纹，无需重启发现）。
@@ -888,6 +911,10 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 }
                 // 记录对端友好名（供共享列表展示），优先于握手 hello。
                 g.peer_names.insert(device_id.clone(), name.clone());
+                // 记录对端广播携带的本机 IP（供「机器名 + IP」去重）。
+                if let Some(ip) = info.get_property_val_str("ip") {
+                    g.peer_ips.insert(device_id.clone(), ip.to_string());
+                }
                 // 记录 mDNS 全名，供 ServiceRemoved 精确匹配（fullname 取自设备名，不含 device_id）。
                 g.peer_fullnames
                     .insert(device_id.clone(), info.get_fullname().to_string());
@@ -958,6 +985,7 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                         }
                         g.known_peers.remove(&id);
                         g.peer_names.remove(&id);
+                        g.peer_ips.remove(&id);
                         g.peer_fullnames.remove(&id);
                         let abort = g.conn_aborts.remove(&id);
                         let was = g.conns.remove(&id).is_some();
@@ -1551,24 +1579,41 @@ async fn register_conn(
             return;
         }
 
+        // 本机 IP：优先取对端 mDNS 广播携带的 `ip`（避免 `.local` 域名解析差异），
+        // 否则回退连接对端地址（手动 peer 无 mDNS 广播时）。
+        let new_ip = g
+            .peer_ips
+            .get(device_id)
+            .cloned()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| addr.ip().to_string());
         // 同机去重：若已存在「相同 IP 且相同 name（主机名）但不同 device_id」的旧连接，
         // 先踢掉旧条目再注册新的。只在「同一台机器换了 UUID（网络波动 / 重连 /
         // device_id 碰撞重生 / 僵尸连接未及时清理）」时合并；绝不误伤局域网内
         // 不同 IP 的同名真机（克隆镜像、企业批量部署），规避纯 name 去重导致的互相踢、
-        // 共享乒乓抖动甚至失败。地址只用 IP（忽略端口），以兼容重连换端口的场景。
-        let new_ip = addr.ip().to_string();
+        // 共享乒乓抖动甚至失败。IP 优先取广播地址，回退连接地址，二者任一匹配即视为同机，
+        // 避免 `.local` 解析差异导致漏去重。
         let old_id: Option<String> = g
             .conns
             .iter()
             .find(|(id, h)| {
                 *id != device_id
-                    && h.addr == new_ip
-                    && g.peer_names.get(*id).map_or(false, |n| n == &resolved)
+                    && {
+                        let old_ip = g
+                            .peer_ips
+                            .get(*id)
+                            .cloned()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| h.addr.clone());
+                        old_ip == new_ip
+                            && g.peer_names.get(*id).map_or(false, |n| n == &resolved)
+                    }
             })
             .map(|(id, _)| id.clone());
         if let Some(ref oid) = old_id {
             g.conns.remove(oid);
             g.peer_names.remove(oid);
+            g.peer_ips.remove(oid);
             // 中止旧连接的读任务，真正关闭 socket
             if let Some(abort) = g.conn_aborts.remove(oid) {
                 abort.abort();
