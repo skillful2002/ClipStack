@@ -11,6 +11,7 @@ mod i18n;
 mod keychain;
 mod lan;
 mod models;
+mod menu;
 mod tray;
 
 use std::sync::{
@@ -207,6 +208,27 @@ pub fn run() {
             // 托盘菜单语言状态（前端通过 language-changed 事件推送已解析语言）。
             app.manage(i18n::MenuLang::default());
 
+            // 顶部原生菜单栏（App / Edit / Window / Help）：自定义以覆盖 Tauri/muda 写死的
+            // 英文预定义项，文案跟随应用语言（默认 system = 跟随系统）。首次以持久化的语言
+            // 设置初始化；前端加载后会经 `language-changed` 事件推送已解析语言并重建。
+            {
+                let conn = db_state.conn.lock().expect("db lock poisoned");
+                let setting = db::get_string_setting(&conn, "language", "system");
+                let lang = i18n::Lang::resolve(
+                    &setting,
+                    *app.state::<i18n::MenuLang>().0.lock().expect("menu lang lock poisoned"),
+                );
+                drop(conn);
+                match menu::build_app_menu(app.handle(), lang) {
+                    Ok(m) => {
+                        if let Err(e) = app.set_menu(m) {
+                            eprintln!("[clipstack] 初始顶部菜单设置失败: {e}");
+                        }
+                    }
+                    Err(e) => eprintln!("[clipstack] 初始顶部菜单构建失败: {e}"),
+                }
+            }
+
             // 启动时把持久化的忽略应用载入内存过滤集合，使其即时生效。
             {
                 let conn = db_state.conn.lock().expect("db lock poisoned");
@@ -272,6 +294,15 @@ pub fn run() {
                             &db_for_lang,
                             &state_for_lang_tray,
                         );
+                        // 顶部菜单栏文案跟随语言重建（覆盖 muda 默认英文）。
+                        match menu::build_app_menu(&app_handle_for_lang, l) {
+                            Ok(m) => {
+                                if let Err(e) = app_handle_for_lang.set_menu(m) {
+                                    eprintln!("[clipstack] 顶部菜单语言切换失败: {e}");
+                                }
+                            }
+                            Err(e) => eprintln!("[clipstack] 顶部菜单重建失败: {e}"),
+                        }
                     }
                 }
             });
@@ -395,6 +426,19 @@ pub fn run() {
                     })
                     .ok();
             }
+
+            // 顶部菜单栏「帮助」自定义项：点击跳转前端帮助页（与托盘「帮助」行为一致）。
+            // 其余预定义项（关于 / 退出 / 隐藏 …）由系统自动处理，无需在此处理。
+            app.on_menu_event(|app, event| {
+                if event.id().as_ref() == "help" {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                    set_dock_visible(app);
+                    let _ = app.emit("show-view", "help");
+                }
+            });
 
             Ok(())
         })
