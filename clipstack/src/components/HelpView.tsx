@@ -31,6 +31,7 @@ export function HelpView() {
 
       <div className="settings-card help-card">
         <p className="settings-hint help-intro">{t("help.intro")}</p>
+        <p className="help-p">{t("help.layout")}</p>
 
         <Section title={t("help.install")}>
           <p className="help-p">{t("help.installText")}</p>
@@ -57,7 +58,11 @@ export function HelpView() {
             <li>{t("help.basicCopy")}</li>
             <li>{t("help.basicPin")}</li>
             <li>{t("help.basicDelete")}</li>
+            <li>{t("help.basicSaveAs")}</li>
+            <li>{t("help.basicClearAll")}</li>
+            <li>{t("help.linkOpenBrowser")}</li>
           </ul>
+          <p className="help-p">{t("help.basicTip")}</p>
         </Section>
 
         <Section title={t("help.filter")}>
@@ -140,6 +145,16 @@ export function HelpView() {
             <li>{t("help.lanOnlineDevices")}</li>
             <li>{t("help.lanPackage")}</li>
             <li>{t("help.lanSaveAs")}</li>
+          </ul>
+        </Section>
+
+        <Section title={t("help.faqTitle")}>
+          <ul className="help-ul help-faq">
+            <li>{t("help.faq1")}</li>
+            <li>{t("help.faq2")}</li>
+            <li>{t("help.faq3")}</li>
+            <li>{t("help.faq4")}</li>
+            <li>{t("help.faq5")}</li>
           </ul>
         </Section>
 
