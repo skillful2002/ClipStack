@@ -1,0 +1,46 @@
+/* 悬浮提示气泡：定位在锚点正上方居中，箭头朝下指向元素。 */
+
+.tooltip-anchor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tooltip-bubble {
+  position: fixed;
+  z-index: 10000;
+  transform: translate(-50%, -100%);
+  max-width: 240px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: #f5f6f8;
+  background: rgba(28, 30, 36, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: tooltip-fade 0.12s ease-out;
+}
+
+.tooltip-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(28, 30, 36, 0.96);
+}
+
+@keyframes tooltip-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

@@ -5,6 +5,7 @@ import { TYPE_META, relativeTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { ACTION_SHORTCUTS } from "../lib/shortcuts";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon, ExternalLinkIcon } from "./icons";
+import { Tooltip } from "./Tooltip";
 
 interface Props {
   item: HistoryItem;
@@ -60,38 +61,58 @@ export function HistoryItemRow({
       </div>
 
       <div className="item-badges">
-        {item.isPinned && <PinIcon size={14} active />}
-        {item.isFavorite && <StarIcon size={14} active />}
+        {item.isPinned && (
+          <Tooltip label={t("action.unpin")}>
+            <PinIcon size={14} active />
+          </Tooltip>
+        )}
+        {item.isFavorite && (
+          <Tooltip label={t("action.unfav")}>
+            <StarIcon size={14} active />
+          </Tooltip>
+        )}
         {item.isSensitive && (
-          <span className="item-sensitive" title={t("item.sensitiveHint")}>
-            {t("item.sensitive")}
-          </span>
+          <Tooltip label={t("item.sensitiveHint")}>
+            <span className="item-sensitive">{t("item.sensitive")}</span>
+          </Tooltip>
         )}
       </div>
 
       <div className="item-actions" onClick={(e) => e.stopPropagation()}>
-        <button title={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`} onClick={() => onCopy(item)}>
-          <CopyIcon size={15} />
-        </button>
-        {(item.contentType === "image" || item.contentType === "file") && (
-          <button title={t("action.save")} onClick={() => onSave(item)}>
-            <SaveIcon size={15} />
+        <Tooltip label={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`}>
+          <button onClick={() => onCopy(item)} aria-label={t("action.copy")}>
+            <CopyIcon size={15} />
           </button>
+        </Tooltip>
+        {(item.contentType === "image" || item.contentType === "file") && (
+          <Tooltip label={t("action.save")}>
+            <button onClick={() => onSave(item)} aria-label={t("action.save")}>
+              <SaveIcon size={15} />
+            </button>
+          </Tooltip>
         )}
         {item.contentType === "link" && (
-          <button title={t("action.open")} onClick={() => onOpen(item)}>
-            <ExternalLinkIcon size={15} />
-          </button>
+          <Tooltip label={t("action.open")}>
+            <button onClick={() => onOpen(item)} aria-label={t("action.open")}>
+              <ExternalLinkIcon size={15} />
+            </button>
+          </Tooltip>
         )}
-        <button title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`} onClick={() => onPin(item)}>
-          <PinIcon size={15} active={item.isPinned} />
-        </button>
-        <button title={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`} onClick={() => onFav(item)}>
-          <StarIcon size={15} active={item.isFavorite} />
-        </button>
-        <button title={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`} className="danger" onClick={() => onDelete(item)}>
-          <TrashIcon size={15} />
-        </button>
+        <Tooltip label={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`}>
+          <button onClick={() => onPin(item)} aria-label={item.isPinned ? t("action.unpin") : t("action.pin")}>
+            <PinIcon size={15} active={item.isPinned} />
+          </button>
+        </Tooltip>
+        <Tooltip label={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`}>
+          <button onClick={() => onFav(item)} aria-label={item.isFavorite ? t("action.unfav") : t("action.fav")}>
+            <StarIcon size={15} active={item.isFavorite} />
+          </button>
+        </Tooltip>
+        <Tooltip label={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`}>
+          <button onClick={() => onDelete(item)} className="danger" aria-label={t("action.delete")}>
+            <TrashIcon size={15} />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );

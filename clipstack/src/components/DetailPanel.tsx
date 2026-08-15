@@ -9,6 +9,7 @@ import { TYPE_META, formatBytes, fullDateTime } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { ACTION_SHORTCUTS } from "../lib/shortcuts";
 import { TypeIcon, CopyIcon, PinIcon, StarIcon, TrashIcon, SaveIcon, ExternalLinkIcon } from "./icons";
+import { Tooltip } from "./Tooltip";
 import hljs from "highlight.js/lib/common";
 import "highlight.js/styles/github-dark.css";
 
@@ -197,27 +198,39 @@ export function DetailPanel() {
 
       <div className="detail-actions" ref={actionsRef}>
         {(item.contentType === "image" || item.contentType === "file") && (
-          <button onClick={() => save(item)} title={t("action.save")}>
-            <SaveIcon size={16} />
-          </button>
+          <Tooltip label={t("action.save")}>
+            <button onClick={() => save(item)} aria-label={t("action.save")}>
+              <SaveIcon size={16} />
+            </button>
+          </Tooltip>
         )}
         {item.contentType === "link" && (
-          <button onClick={() => open(item)} title={t("action.open")}>
-            <ExternalLinkIcon size={16} />
-          </button>
+          <Tooltip label={t("action.open")}>
+            <button onClick={() => open(item)} aria-label={t("action.open")}>
+              <ExternalLinkIcon size={16} />
+            </button>
+          </Tooltip>
         )}
-        <button className="primary" onClick={() => copy(item)} title={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`}>
-          <CopyIcon size={16} />
-        </button>
-        <button onClick={() => pin(item)} title={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`}>
-          <PinIcon size={16} active={item.isPinned} />
-        </button>
-        <button onClick={() => fav(item)} title={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`}>
-          <StarIcon size={16} active={item.isFavorite} />
-        </button>
-        <button className="danger" onClick={() => del(item)} title={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`}>
-          <TrashIcon size={16} />
-        </button>
+        <Tooltip label={`${t("action.copy")}  ${ACTION_SHORTCUTS.copy}`}>
+          <button className="primary" onClick={() => copy(item)} aria-label={t("action.copy")}>
+            <CopyIcon size={16} />
+          </button>
+        </Tooltip>
+        <Tooltip label={`${item.isPinned ? t("action.unpin") : t("action.pin")}  ${ACTION_SHORTCUTS.pin}`}>
+          <button onClick={() => pin(item)} aria-label={item.isPinned ? t("action.unpin") : t("action.pin")}>
+            <PinIcon size={16} active={item.isPinned} />
+          </button>
+        </Tooltip>
+        <Tooltip label={`${item.isFavorite ? t("action.unfav") : t("action.fav")}  ${ACTION_SHORTCUTS.fav}`}>
+          <button onClick={() => fav(item)} aria-label={item.isFavorite ? t("action.unfav") : t("action.fav")}>
+            <StarIcon size={16} active={item.isFavorite} />
+          </button>
+        </Tooltip>
+        <Tooltip label={`${t("action.delete")}  ${ACTION_SHORTCUTS.del}`}>
+          <button className="danger" onClick={() => del(item)} aria-label={t("action.delete")}>
+            <TrashIcon size={16} />
+          </button>
+        </Tooltip>
       </div>
 
       {lightboxOpen && imgUrl && (
