@@ -97,11 +97,76 @@
 }
 
 .sidebar-bottom {
+  position: relative;
   border-top: 1px solid var(--cs-border);
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* 底部「更多」入口：作为向上弹出菜单的定位锚点。 */
+.sidebar-more {
+  position: relative;
+}
+
+/* 「更多」菜单遮罩：全屏透明层，点击任意处关闭菜单。 */
+.more-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+/* 「更多」弹出菜单：定位于触发器正上方，右侧对齐。 */
+.more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 1001;
+  min-width: 178px;
+  padding: 6px;
+  background: var(--cs-bg-hover);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  animation: more-menu-in 0.12s ease-out;
+}
+
+@keyframes more-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 菜单项：复用 nav-item 视觉，尺寸略紧凑。 */
+.more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--cs-radius-md);
+  color: var(--cs-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.more-menu-item:hover {
+  background: var(--cs-bg);
+}
+
+.more-menu-item.active {
+  background: var(--cs-accent-soft);
+  color: var(--cs-accent);
+  font-weight: 600;
 }
 
 /* 分类列表与「来源」分组之间的分隔横线（紧贴「文件」之后）。 */

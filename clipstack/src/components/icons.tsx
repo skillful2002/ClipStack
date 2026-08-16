@@ -194,6 +194,17 @@ export function HelpIcon({ size = 16 }: IconProps) {
   );
 }
 
+/** 更多（水平三点）：收纳底部入口的弹出菜单触发器。 */
+export function MoreIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="19" cy="12" r="1.7" />
+    </svg>
+  );
+}
+
 /** 来源（应用 / 出处）：层叠方块，表示内容来源。 */
 export function SourceIcon({ size = 16 }: IconProps) {
   return (
