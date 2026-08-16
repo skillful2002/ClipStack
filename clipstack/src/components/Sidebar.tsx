@@ -1,11 +1,12 @@
 // P3 · 左侧边栏：搜索、分类导航、回收站 / 设置入口。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { useHistory, type Category } from "../store/history";
 import type { ContentType } from "../types";
 import { TYPE_META } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { NAV_SHORTCUTS } from "../lib/shortcuts";
+import { Tooltip } from "./Tooltip";
 import {
   SearchIcon,
   TypeIcon,
@@ -17,7 +18,6 @@ import {
   HomeIcon,
   SourceIcon,
   ClearIcon,
-  MoreIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -42,21 +42,6 @@ export function Sidebar() {
   const setView = useHistory((s) => s.setView);
   const hasUpdate = useHistory((s) => s.updateInfo?.hasUpdate ?? false);
   const searchRef = useRef<HTMLInputElement>(null);
-
-  // 底部「更多」弹出菜单开关；打开期间按 Esc 关闭。
-  const [moreOpen, setMoreOpen] = useState(false);
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMoreOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [moreOpen]);
-
-  // 「更多」菜单收纳的视图之一处于当前视图时，触发器高亮。
-  const moreActive =
-    view === "settings" || view === "trash" || view === "help" || view === "about";
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -174,100 +159,66 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-bottom">
-        <button
-          className={`nav-item${view === "main" ? " active" : ""}`}
-          onClick={() => {
-            setCategory("all");
-            setView("main");
-          }}
-        >
-          <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-            <HomeIcon size={16} />
-          </span>
-          <span className="nav-label">{t("sidebar.main")}</span>
-        </button>
-        <div className="sidebar-more">
+        <Tooltip label={t("sidebar.main")}>
           <button
-            type="button"
-            className={`nav-item${moreActive ? " active" : ""}`}
-            onClick={() => setMoreOpen((v) => !v)}
-            aria-haspopup="menu"
-            aria-expanded={moreOpen}
+            className={`nav-item${view === "main" ? " active" : ""}`}
+            onClick={() => {
+              setCategory("all");
+              setView("main");
+            }}
           >
             <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-              <MoreIcon size={16} />
+              <HomeIcon size={16} />
             </span>
-            <span className="nav-label">{t("sidebar.more")}</span>
-            {hasUpdate && !moreOpen && (
+          </button>
+        </Tooltip>
+        <Tooltip label={`${t("sidebar.settings")} ${NAV_SHORTCUTS.settings}`}>
+          <button
+            type="button"
+            className={`nav-item${view === "settings" ? " active" : ""}`}
+            onClick={() => setView("settings")}
+          >
+            <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+              <SettingsIcon size={16} />
+            </span>
+          </button>
+        </Tooltip>
+        <Tooltip label={`${t("sidebar.trash")} ${NAV_SHORTCUTS.trash}`}>
+          <button
+            type="button"
+            className={`nav-item${view === "trash" ? " active" : ""}`}
+            onClick={() => setView("trash")}
+          >
+            <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+              <TrashBinIcon size={16} />
+            </span>
+          </button>
+        </Tooltip>
+        <Tooltip label={t("sidebar.help")}>
+          <button
+            type="button"
+            className={`nav-item${view === "help" ? " active" : ""}`}
+            onClick={() => setView("help")}
+          >
+            <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+              <HelpIcon size={16} />
+            </span>
+          </button>
+        </Tooltip>
+        <Tooltip label={t("sidebar.about")}>
+          <button
+            type="button"
+            className={`nav-item${view === "about" ? " active" : ""}`}
+            onClick={() => setView("about")}
+          >
+            <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
+              <AboutIcon size={16} />
+            </span>
+            {hasUpdate && (
               <span className="nav-badge" aria-label={t("about.newVersionBadge")} />
             )}
           </button>
-          {moreOpen && (
-            <>
-              <div className="more-overlay" onClick={() => setMoreOpen(false)} />
-              <div className="more-menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`more-menu-item${view === "settings" ? " active" : ""}`}
-                  onClick={() => {
-                    setView("settings");
-                    setMoreOpen(false);
-                  }}
-                >
-                  <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-                    <SettingsIcon size={16} />
-                  </span>
-                  <span className="nav-label">{t("sidebar.settings")}</span>
-                  <span className="nav-shortcut">{NAV_SHORTCUTS.settings}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`more-menu-item${view === "trash" ? " active" : ""}`}
-                  onClick={() => {
-                    setView("trash");
-                    setMoreOpen(false);
-                  }}
-                >
-                  <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-                    <TrashBinIcon size={16} />
-                  </span>
-                  <span className="nav-label">{t("sidebar.trash")}</span>
-                  <span className="nav-shortcut">{NAV_SHORTCUTS.trash}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`more-menu-item${view === "help" ? " active" : ""}`}
-                  onClick={() => {
-                    setView("help");
-                    setMoreOpen(false);
-                  }}
-                >
-                  <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-                    <HelpIcon size={16} />
-                  </span>
-                  <span className="nav-label">{t("sidebar.help")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`more-menu-item${view === "about" ? " active" : ""}`}
-                  onClick={() => {
-                    setView("about");
-                    setMoreOpen(false);
-                  }}
-                >
-                  <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-                    <AboutIcon size={16} />
-                  </span>
-                  <span className="nav-label">{t("sidebar.about")}</span>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        </Tooltip>
       </div>
     </aside>
   );

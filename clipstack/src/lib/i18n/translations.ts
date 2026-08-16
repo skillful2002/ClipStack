@@ -15,7 +15,6 @@ const zhCN: Dict = {
   "sidebar.settings": "设置",
   "sidebar.about": "关于系统",
   "sidebar.help": "帮助",
-  "sidebar.more": "更多",
 
   "type.text": "文本",
   "type.link": "链接",
@@ -347,7 +346,6 @@ const zhTW: Dict = {
   "sidebar.settings": "設定",
   "sidebar.about": "關於系統",
   "sidebar.help": "說明",
-  "sidebar.more": "更多",
 
   "type.text": "文字",
   "type.link": "連結",
@@ -679,7 +677,6 @@ const en: Dict = {
   "sidebar.settings": "Settings",
   "sidebar.about": "About",
   "sidebar.help": "Help",
-  "sidebar.more": "More",
 
   "type.text": "Text",
   "type.link": "Link",
@@ -1011,7 +1008,6 @@ const ja: Dict = {
   "sidebar.settings": "設定",
   "sidebar.about": "バージョン情報",
   "sidebar.help": "ヘルプ",
-  "sidebar.more": "もっと",
 
   "type.text": "テキスト",
   "type.link": "リンク",
@@ -1343,7 +1339,6 @@ const de: Dict = {
   "sidebar.settings": "Einstellungen",
   "sidebar.about": "Über",
   "sidebar.help": "Hilfe",
-  "sidebar.more": "Mehr",
 
   "type.text": "Text",
   "type.link": "Link",
@@ -1675,7 +1670,6 @@ const fr: Dict = {
   "sidebar.settings": "Paramètres",
   "sidebar.about": "À propos",
   "sidebar.help": "Aide",
-  "sidebar.more": "Plus",
 
   "type.text": "Texte",
   "type.link": "Lien",
