@@ -73,15 +73,12 @@ export function AllIcon({ size = 16 }: IconProps) {
   );
 }
 
-/** 主界面（窗口）：与托盘弹出菜单「主界面」图标保持一致的窗口字形（外框 + 标题栏 + 交通灯三点）。 */
-export function MainWindowIcon({ size = 16 }: IconProps) {
+/** 主界面（Home）：房子图形，表示回到剪贴板主列表。 */
+export function HomeIcon({ size = 16 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M3 9h18" />
-      <circle cx="7" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
-      <circle cx="10" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
-      <circle cx="13" cy="6.5" r="0.9" fill="currentColor" stroke="none" />
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   );
 }

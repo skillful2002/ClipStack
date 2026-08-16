@@ -101,8 +101,24 @@
   border-top: 1px solid var(--cs-border);
   padding: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  gap: 4px;
+}
+
+/* 底部「主界面」与「更多」并排一行：两按钮等分宽度、内容居中。 */
+.sidebar-bottom > .nav-item,
+.sidebar-more {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-bottom > .nav-item,
+.sidebar-more > .nav-item {
+  justify-content: center;
+}
+
+.sidebar-bottom .nav-label {
+  flex: 0 0 auto;
 }
 
 /* 底部「更多」入口：作为向上弹出菜单的定位锚点。 */

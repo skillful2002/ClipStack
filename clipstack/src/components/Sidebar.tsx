@@ -14,7 +14,7 @@ import {
   AboutIcon,
   HelpIcon,
   AllIcon,
-  MainWindowIcon,
+  HomeIcon,
   SourceIcon,
   ClearIcon,
   MoreIcon,
@@ -64,7 +64,7 @@ export function Sidebar() {
     return c;
   }, [items]);
 
-  // 最常见的 5 个来源：数量降序；数量相同按最后剪切时间（createdAt）倒序。
+  // 最常见的 12 个来源：数量降序；数量相同按最后剪切时间（createdAt）倒序。
   // 按当前所选分类（类型）限定用于统计来源的数据范围：
   // 「全部」用全量 items，否则只用该 content type 的条目。
   const scopedItems = useMemo(
@@ -84,7 +84,7 @@ export function Sidebar() {
     }
     return [...map.entries()]
       .sort((a, b) => b[1].count - a[1].count || b[1].last - a[1].last)
-      .slice(0, 8)
+      .slice(0, 12)
       .map(([key]) => key);
   }, [scopedItems]);
 
@@ -182,7 +182,7 @@ export function Sidebar() {
           }}
         >
           <span className="nav-icon" style={{ color: "var(--cs-text-secondary)" }}>
-            <MainWindowIcon size={16} />
+            <HomeIcon size={16} />
           </span>
           <span className="nav-label">{t("sidebar.main")}</span>
         </button>
