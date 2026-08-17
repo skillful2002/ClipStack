@@ -207,26 +207,21 @@ fn handle_menu_event(
             if state.is_locked() {
                 return;
             }
-            // 取密钥用于解密（key=None 时透传明文，兼容未启用安全）。
+            // 取条目元数据（content_text 已按当前 key 解密）。
             // 锁顺序与 build_menu / 捕获线程一致：先 conn 后 key，避免 AB/BA 死锁。
-            let (item, blob) = {
+            let item = {
                 let conn = db.conn.lock().expect("db lock poisoned");
                 let key_guard = db.key.lock().expect("key lock poisoned");
-                let item = db::get_item(&conn, key_guard.as_ref(), id_num).ok();
-                let blob: Option<Vec<u8>> = item.as_ref().and_then(|it| {
-                    if matches!(it.content_type, ContentType::Image | ContentType::File) {
-                        conn.query_row(
-                            "SELECT content_blob FROM history WHERE id = ?",
-                            [id_num],
-                            |r| r.get(0),
-                        )
-                        .ok()
-                    } else {
-                        None
-                    }
-                });
-                (item, blob)
+                db::get_item(&conn, key_guard.as_ref(), id_num).ok()
             };
+            // 取二进制（图片 PNG / 文件 JSON 路径数组）。复用 `read_item_raw`：
+            // 其内部统一加锁并对 content_blob 做 open_blob 解密，与前端 copy_image /
+            // copy_file 命令路径一致；避免此处漏解密导致「加密状态下图片/文件复制失败」。
+            // 注意：read_item_raw 会自行加锁，故不可在上方持锁块内调用（会死锁）。
+            let blob = item
+                .as_ref()
+                .filter(|it| matches!(it.content_type, ContentType::Image | ContentType::File))
+                .and_then(|_| db::read_item_raw(db, id_num, "history").and_then(|(b, _)| b));
             if let Some(item) = item {
                 match item.content_type {
                     ContentType::Image => {
