@@ -767,11 +767,14 @@ impl LanManager {
     /// 当前在线设备列表。
     pub async fn peers(&self) -> Vec<PeerInfo> {
         let inner = self.inner.lock().await;
-        // 展示层去重：按「机器名 + IP」合并，确保同一台物理机器（可能因 device_id 重生成 /
-        // 网络波动短暂并存多个连接）在在线列表中只出现一次。底层 WebSocket 连接仍各自独立
-        // 基于 device_id 管理，此处仅合并对外展示，不影响建立的连接与断线检测。
-        let mut seen: std::collections::HashSet<(String, String)> =
-            std::collections::HashSet::new();
+        // 展示层去重：按「机器名」合并（而非「机器名 + IP」）。VPN / IP 共享（NAT）下，
+        // 同一台机器可能经多个地址（隧道地址 / 网关地址 / 局域网地址）建立多条连接，
+        // 若按 (name, ip) 去重会显示成多台相同的电脑；按 name 合并则同一主机名只保留
+        // 一条（取连接表中先出现的条目）。底层 WebSocket 连接仍各自独立基于 device_id
+        // 管理，此处仅合并对外展示，不影响建立的连接与断线检测。
+        // 权衡：局域网内两台不同真机同名（克隆镜像 / 批量部署）会被合并为一条展示，
+        // 但功能不受影响（同步仍按各自连接进行）。
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut out = Vec::new();
         for h in inner.conns.values() {
             // 设备 IP：优先用连接登记的 IP（广播 IP 优先），缺失时回退查询对端广播 IP。
@@ -790,8 +793,8 @@ impl LanManager {
             if name.is_empty() || name == h.device_id {
                 continue;
             }
-            // 「机器名 + IP」去重：同 (name, ip) 只保留首条，避免同机多连接重复展示。
-            if !seen.insert((name.clone(), ip.clone())) {
+            // 「机器名」去重：同名只保留首条，避免同机多连接/多 IP 重复展示。
+            if !seen.insert(name.clone()) {
                 continue;
             }
             out.push(PeerInfo {

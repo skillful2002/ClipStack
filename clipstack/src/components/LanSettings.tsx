@@ -485,11 +485,13 @@ export function LanSettings() {
   );
 }
 
-/** 上线事件：按 deviceId 更新或插入对端。 */
+/** 上线事件：按「机器名」合并插入对端（与后端 peers() 展示层去重一致——同名只保留
+ * 一条，避免 VPN / IP 共享下同一台机器因 device_id 重生 / 多路径连接重复展示）。
+ * p 无有效名称（空或等于 deviceId）时退化为按 deviceId 更新。 */
 function upsertPeer(prev: api.PeerInfo[], p: api.PeerInfo): api.PeerInfo[] {
-  const idx = prev.findIndex((x) => x.deviceId === p.deviceId);
-  if (idx < 0) return [...prev, p];
-  const next = prev.slice();
-  next[idx] = p;
-  return next;
+  const byName =
+    p.name && p.name !== p.deviceId
+      ? prev.filter((x) => x.name !== p.name)
+      : prev.filter((x) => x.deviceId !== p.deviceId);
+  return [...byName, p];
 }
