@@ -996,7 +996,20 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
             // 角色判定：本机 device_id 较大 -> 我是客户端，向对端发起；否则我监听，等对方连。
             let my_id = inner.lock().await.config.device_id.clone();
             if device_id == my_id {
-                // 危险信号：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
+                // 先排除「看到的是自己」：VPN / IP 共享下组播可能被网关中继回源，或本机
+                // 从自己的 mDNS 缓存/回环收到自己宣告的记录（fullname 与 TXT 均与本机一致）。
+                // 此时若直接重生 device_id，会让对端同时看到旧 id（连接仍在）与新 id 的
+                // 本机，在线列表出现「同一台电脑多台」的重复条目。判断依据：解析地址 /
+                // TXT ip 与本机出口 IP 一致（或回环）即视为自身反射，忽略即可。
+                let my_ip = local_ipv4();
+                let txt_ip = info.get_property_val_str("ip").unwrap_or("");
+                let is_self = addr.ip().is_loopback()
+                    || my_ip.map_or(false, |m| m == addr.ip())
+                    || my_ip.map_or(false, |m| m.to_string() == txt_ip);
+                if is_self {
+                    return;
+                }
+                // 真实碰撞：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
                 // 此时 `device_id >= my_id` 在两侧都成立 -> 双方都只监听、永不连接，
                 // 表现为「互相完全看不到」。本机自动重生 device_id 并重启发现以自愈。
                 let m = mgr.clone();
