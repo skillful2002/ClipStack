@@ -273,6 +273,12 @@ struct Inner {
     server_task: Option<tauri::async_runtime::JoinHandle<()>>,
     /// mDNS 周期重宣告任务句柄：stop() 时中止，避免共享关闭后仍在重宣告本机服务。
     reannounce_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// 网络维护任务句柄（30s 周期）：检测本机出口 IP 变化并重建网络栈（stop+start，
+    /// 用新 IP 重新注册 mDNS / 重绑监听）；IP 未变时周期重宣告刷新对端缓存。
+    /// 弥补 mdns-sd 不感知 IP 变化、默认 TTL 长导致对端缓存旧 IP 的问题。stop() 时中止。
+    maintain_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// 最近一次 mDNS 注册时记录的本机出口 IP（字符串），供维护任务检测 IP 变化。
+    last_local_ip: Option<String>,
 }
 
 /// 局域网同步管理器（Tauri 托管状态）。
@@ -312,6 +318,8 @@ impl LanManager {
                 db,
                 server_task: None,
                 reannounce_task: None,
+                maintain_task: None,
+                last_local_ip: None,
             })),
             share_out_flag: Arc::new(AtomicBool::new(share_out)),
             app,
@@ -388,27 +396,15 @@ impl LanManager {
         // 切勿把完整服务名（含 "_clipstack._tcp.local." 后缀）当作实例名传入，
         // 否则会生成 "my-pc._clipstack._tcp.local.._clipstack._tcp.local." 这样的畸形全名，
         // 永远匹配不上 `browse("_clipstack._tcp.local.")`，导致两端互相发现失败。
-        let fp = crypto::group_fingerprint(&inner.config.share_group, &inner.config.share_key);
-        let instance = lan_instance_name(&inner.config.device_name);
-        let host = format!("{}.local.", sanitize_name(&inner.config.device_name));
-        let local_ip = local_ipv4();
-        let ip_arg: IpAddr = local_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
-        let mut props: HashMap<String, String> = HashMap::new();
-        props.insert("device_id".into(), inner.config.device_id.clone());
-        props.insert("name".into(), inner.config.device_name.clone());
-        props.insert("version".into(), APP_VERSION.into());
-        props.insert("group_fp".into(), fp);
-        // 本机出口 IP 也写入 TXT，便于对端「机器名 + IP」去重，并在 `.local` 域名
-        // 解析不可靠的网络下提供直接可达地址（不影响现有连接路径）。
-        let local_ip_str = local_ip.map(|i| i.to_string()).unwrap_or_default();
-        props.insert("ip".into(), local_ip_str);
-        let info = match ServiceInfo::new(SERVICE_TYPE, &instance, &host, ip_arg, inner.config.listen_port, props) {
-            Ok(i) => i,
-            Err(e) => {
-                eprintln!("[lan] 服务实例创建失败: {e}");
+        let (info, local_ip_str) = match build_service_info(&inner.config) {
+            Some(v) => v,
+            None => {
+                eprintln!("[lan] 服务实例创建失败");
                 return;
             }
         };
+        // 记录本次注册使用的出口 IP，供维护任务检测 IP 变化（变化时重建网络栈）。
+        inner.last_local_ip = local_ip_str;
         // 克隆一份实例与守护句柄，供下方周期重宣告任务使用（避免占用 `info`/`mdns`）。
         let info_for_reannounce = info.clone();
         if let Err(e) = mdns.register(info) {
@@ -511,6 +507,59 @@ impl LanManager {
             }
         });
         inner.reannounce_task = Some(reannounce);
+
+        // 7) 网络维护任务（30s 周期）：
+        // - 检测本机出口 IP 变化：离开局域网再回来 / 切换网络 / VPN 变更都会导致 IP 变化，
+        //   而 mdns-sd 的 daemon 不感知接口/IP 变化、已注册实例的 A 记录仍是旧 IP，
+        //   对端缓存旧 IP 后连接永远失败（表现为「需手动开关共享多次才能连上」）。
+        //   检测到变化即 stop()+start() 重建网络栈：用新 IP 重新注册 mDNS、重绑监听端口；
+        // - IP 未变时周期重宣告（用最新 IP 重建实例注册，刷新对端缓存），弥补 mdns-sd
+        //   默认 TTL 长（4500s≈75min）、对端缓存陈旧的问题。
+        // 重建通过独立 spawn 的 stop+start 执行（stop 会中止本维护任务，需先发起再退出；
+        // start() 会创建新的维护任务），避免自中止造成的竞态。
+        let inner_m = self.inner.clone();
+        let mgr_m = self.clone();
+        let maintain = tauri::async_runtime::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            // tokio interval 首次 tick 立即触发：先消费掉，让第一轮在 30s 后执行
+            // （启动初期的快速宣告由上方 reannounce 任务负责）。
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let (alive, ip_now, last_ip) = {
+                    let g = inner_m.lock().await;
+                    let ip_now = local_ipv4().map(|i| i.to_string());
+                    (
+                        g.config.share_out && g.mdns.is_some(),
+                        ip_now,
+                        g.last_local_ip.clone(),
+                    )
+                };
+                if !alive {
+                    break;
+                }
+                if let Some(ip) = ip_now {
+                    if last_ip.as_deref() != Some(ip.as_str()) {
+                        // 出口 IP 变化：更新记录并重建网络栈。
+                        {
+                            let mut g = inner_m.lock().await;
+                            g.last_local_ip = Some(ip);
+                        }
+                        let m = mgr_m.clone();
+                        rebuild_for_ip_change(m);
+                        break;
+                    }
+                }
+                // IP 未变：周期重宣告（重建实例以携带最新 TXT / A 记录，刷新对端缓存）。
+                let cfg = inner_m.lock().await.config.clone();
+                if let Some(mdns) = inner_m.lock().await.mdns.clone() {
+                    if let Some((info, _)) = build_service_info(&cfg) {
+                        let _ = mdns.register(info);
+                    }
+                }
+            }
+        });
+        inner.maintain_task = Some(maintain);
         // 在释放 inner 守卫前先把手动对端地址克隆出来。
         inner.config.manual_peers.clone()
     };
@@ -594,7 +643,7 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let (server_handle, reannounce_handle, removed, aborts) = {
+        let (server_handle, reannounce_handle, maintain_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
             let removed: Vec<String> = inner.conns.keys().cloned().collect();
@@ -628,10 +677,11 @@ impl LanManager {
             // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
             // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
             // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
-            // 取出监听/重宣告任务句柄，在释放锁后再中止（避免持锁 await）。
+            // 取出监听/重宣告/维护任务句柄，在释放锁后再中止（避免持锁 await）。
             (
                 inner.server_task.take(),
                 inner.reannounce_task.take(),
+                inner.maintain_task.take(),
                 removed,
                 aborts,
             )
@@ -644,6 +694,10 @@ impl LanManager {
         }
         // 中止 mDNS 周期重宣告任务，避免共享关闭后仍在广播本机服务。
         if let Some(h) = reannounce_handle {
+            h.abort();
+        }
+        // 中止网络维护任务：共享关闭后无需再检测 IP 变化 / 周期宣告。
+        if let Some(h) = maintain_handle {
             h.abort();
         }
         // 主动中止所有对端连接读任务：底层 socket 关闭（FIN），对端 read.next() 立即返回 None
@@ -960,16 +1014,27 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 return;
             }
             // 记录已知对端并发起客户端连接（带重连）。
-            // 去重：mDNS 周期重宣告会重复触发 ServiceResolved，若已在对端表中则不重复
-            // 拉起客户端任务，避免对同一对端建立多条连接（造成在线列表重复条目）。
-            {
+            // 拉起条件以「是否已有活跃连接」为准（而非 known_peers 是否已记录）：
+            // - 已有活跃连接：跳过，避免 mDNS 周期重宣告重复触发 ServiceResolved 时对同一
+            //   对端建立多条连接（在线列表重复条目）；
+            // - 无活跃连接：无论 known_peers 是否残留旧记录，都先停掉可能存在的旧重连任务
+            //   （其闭包持有创建时的旧地址，对端换 IP 后永远连不上），再用本次最新地址重新拉起。
+            // 修复：对端离开后回来（IP 变化），known_peers 残留旧记录 + 旧重连任务持旧地址，
+            // 导致新 ServiceResolved 被跳过，表现为「需手动开关共享多次才能连上」。
+            let (has_conn, stale_stop) = {
                 let mut g = inner.lock().await;
-                if !g.known_peers.contains_key(&device_id) {
-                    g.known_peers.insert(device_id.clone(), addr);
-                    drop(g);
-                    spawn_client_retry(addr, inner, app, Some(device_id)).await;
-                }
+                g.known_peers.insert(device_id.clone(), addr);
+                let has_conn = g.conns.contains_key(&device_id);
+                let stale_stop = g.client_stops.remove(&device_id);
+                (has_conn, stale_stop)
+            };
+            if has_conn {
+                return;
             }
+            if let Some(stop) = stale_stop {
+                stop.store(true, Ordering::SeqCst);
+            }
+            spawn_client_retry(addr, inner, app, Some(device_id)).await;
         }
         ServiceEvent::ServiceRemoved(fullname, _) => {
             // mDNS 全名取自已方设备名（实例名），不含 device_id(UUID)，无法用 contains 匹配；
@@ -1126,11 +1191,12 @@ where
     let read_task = tokio::task::spawn(async move {
         let abort_slot = slot_for_task;
         let mut learned_id: Option<String> = peer_id.clone();
-        // 心跳保活：每 15s 发送一次 Ping，对端自动回 Pong；若 45s 内无任何消息
-        // （含 Pong），视为对端已断线（断电 / 断网等静默断开），主动关闭连接，
-        // 使「在线设备」列表能及时移除该设备。
+        // 心跳保活：每 15s 发送一次 Ping，对端自动回 Pong；若 20s 内无任何消息
+        // （含 Pong），视为对端已断线（断电 / 断网 / VPN 隧道断开等静默断开），主动关闭连接，
+        // 使「在线设备」列表能及时移除该设备（原 45s 过长：VPN/IP 共享下 goodbye 组播
+        // 常丢失，对端「关闭共享后仍显示在线」的窗口就是由该超时决定）。
         let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
-        let idle = std::time::Duration::from_secs(45);
+        let idle = std::time::Duration::from_secs(20);
         // 最近一次「收到任何帧（含对端自动回的 Pong 控制帧）」的时间，用于判断对端存活。
         // 用「连接活跃度」而非「读空闲计时器」：大文件传输时接收方忙于读取整条消息、暂时
         // 无法回应上层消息，但底层仍会自动回 Pong，故不会被误判为断线；真正静默断开
@@ -1695,7 +1761,15 @@ async fn update_peer_name(
 async fn remove_conn(inner: &Arc<Mutex<Inner>>, app: &AppHandle, device_id: &str) {
     let existed = {
         let mut g = inner.lock().await;
-        g.conns.remove(device_id).is_some()
+        let existed = g.conns.remove(device_id).is_some();
+        // 断线即视为该对端当前不在：清理 mDNS 相关缓存（known_peers / peer_fullnames /
+        // peer_ips）。否则对端离开后（无 goodbye）回来换了新 IP 重新宣告时，ServiceResolved
+        // 会因 known_peers 残留旧记录而被跳过重连（旧地址永远连不上，表现为需手动开关多次）。
+        // peer_names 保留作名称缓存（与 stop() 语义一致，避免来源回退为设备 ID）。
+        g.known_peers.remove(device_id);
+        g.peer_fullnames.remove(device_id);
+        g.peer_ips.remove(device_id);
+        existed
     };
     // 同步清理中止句柄，避免泄漏（stop() 已统一 abort 并清空，此处兜底常态断线场景）。
     inner.lock().await.conn_aborts.remove(device_id);
@@ -1770,6 +1844,50 @@ pub(crate) fn local_ipv4() -> Option<IpAddr> {
 /// 若这里再带上 `_clipstack._tcp.local.` 会生成畸形全名，使 `browse` 永远匹配不上。
 fn lan_instance_name(name: &str) -> String {
     sanitize_name(name)
+}
+
+/// 由配置构造本机 mDNS 服务实例（TXT 携带 device_id / name / version / group_fp / ip）。
+/// 返回 `(ServiceInfo, 出口 IP 字符串)`；出口 IP 取不到时 A 记录回退 0.0.0.0、IP 字符串为 None。
+/// 抽成独立函数供 `start()` 注册与维护任务周期重宣告共用：每次都用**最新**出口 IP 重建实例，
+/// 使 IP 变化后对端能解析到新地址（mdns-sd 不感知 IP 变化，不会自动更新已注册实例的地址）。
+fn build_service_info(cfg: &LanConfig) -> Option<(ServiceInfo, Option<String>)> {
+    let fp = crypto::group_fingerprint(&cfg.share_group, &cfg.share_key);
+    let instance = lan_instance_name(&cfg.device_name);
+    let host = format!("{}.local.", sanitize_name(&cfg.device_name));
+    let local_ip = local_ipv4();
+    let ip_arg: IpAddr = local_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    let mut props: HashMap<String, String> = HashMap::new();
+    props.insert("device_id".into(), cfg.device_id.clone());
+    props.insert("name".into(), cfg.device_name.clone());
+    props.insert("version".into(), APP_VERSION.into());
+    props.insert("group_fp".into(), fp);
+    // 本机出口 IP 也写入 TXT，便于对端「机器名 + IP」去重，并在 `.local` 域名
+    // 解析不可靠的网络下提供直接可达地址（不影响现有连接路径）。
+    let local_ip_str = local_ip.map(|i| i.to_string());
+    props.insert("ip".into(), local_ip_str.clone().unwrap_or_default());
+    ServiceInfo::new(
+        SERVICE_TYPE,
+        &instance,
+        &host,
+        ip_arg,
+        cfg.listen_port,
+        props,
+    )
+    .ok()
+    .map(|info| (info, local_ip_str))
+}
+
+/// 出口 IP 变化后的网络栈重建：stop()+start()（用新 IP 重新注册 mDNS、重绑监听端口）。
+/// 独立 spawn（而非在维护任务内直接 stop+start）：stop() 会中止维护任务自身，若直接
+/// 调用会因自中止截断 stop 后半段；独立 spawn 可让维护任务先退出、重建任务接管。
+/// 注意：用同步 fn + async move block（而非 async fn）——async fn 的 opaque future
+/// 在「参数被 &self 方法借用跨 await」场景下 Send 推断保守，直接 spawn 会报
+/// "future cannot be sent between threads safely"；async move block 的具体类型推断正常。
+fn rebuild_for_ip_change(m: LanManager) {
+    tauri::async_runtime::spawn(async move {
+        m.stop().await;
+        m.start().await;
+    });
 }
 
 /// 设备名清洗为合法 mDNS 主机标签。

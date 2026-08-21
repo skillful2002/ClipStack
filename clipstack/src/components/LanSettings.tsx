@@ -78,6 +78,13 @@ export function LanSettings() {
   useEffect(() => {
     void refreshConfig();
 
+    // 兜底：后端 online/offline 事件可能因 mDNS 组播在 VPN / IP 共享下转发不可靠而丢失，
+    // 周期性全量拉取在线设备（后端按「机器名 + IP」去重），消除「关闭共享后列表残留 /
+    // 同一台电脑重复显示」的问题。仅页面挂载期间生效。
+    const refreshTimer = window.setInterval(() => {
+      void refreshPeers();
+    }, 10_000);
+
     const unlisteners = Promise.all([
       api.onLanPeerOnline((p) => setPeers((prev) => upsertPeer(prev, p))),
       api.onLanPeerOffline((p) =>
@@ -98,6 +105,7 @@ export function LanSettings() {
       }),
     ]);
     return () => {
+      window.clearInterval(refreshTimer);
       void unlisteners.then((fns) => fns.forEach((fn) => fn()));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
