@@ -483,14 +483,17 @@ impl LanManager {
 
         // 6) 有限次重宣告：mDNS 浏览仅在「发现新实例」时触发，若对端错过本机首次宣告
         // （如本机宣告时其对端浏览尚未就绪、或其对端缓存了同名旧实例），将长时间看不到本机。
-        // 在启动后若干时间点重新注册，迫使对端重新解析本机服务，使新上线 / 重启后的设备能在
-        // 数秒~十余秒内出现在对方在线列表。采用有限次数（而非无限循环）以避免后台常驻任务
-        // 持续占用资源 / 反复触发注册。
+        // 在启动后 2s/4s/6s/13s/28s 多个时间点重新注册（2s 连发 3 次对抗组播丢包，
+        // 符合 mDNS 新服务连发宣告的惯例），迫使对端重新解析本机服务，使新上线 / 重启后的
+        // 设备能在数秒~十余秒内出现在对方在线列表。采用有限次数（而非无限循环）以避免
+        // 后台常驻任务持续占用资源 / 反复触发注册。
         // 注意：本段仍持有 inner 守卫（需引用下方定义的 mdns_daemon / info_for_reannounce），
         // 故置于释放守卫之前；手动 peer 循环则放在释放守卫之后（见下方说明）。
         let inner_ra = self.inner.clone();
         let reannounce = tauri::async_runtime::spawn(async move {
             let delays = [
+                std::time::Duration::from_secs(2),
+                std::time::Duration::from_secs(2),
                 std::time::Duration::from_secs(2),
                 std::time::Duration::from_secs(7),
                 std::time::Duration::from_secs(15),
