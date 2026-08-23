@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::{AppHandle, Emitter, Manager};
@@ -277,6 +277,12 @@ struct Inner {
     /// 用新 IP 重新注册 mDNS / 重绑监听）；IP 未变时周期重宣告刷新对端缓存。
     /// 弥补 mdns-sd 不感知 IP 变化、默认 TTL 长导致对端缓存旧 IP 的问题。stop() 时中止。
     maintain_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// mDNS daemon 事件监控任务句柄（DaemonEvent：Error / IpAdd / IpDel 等）。
+    /// daemon 线程异常退出或 shutdown 时监控 channel 关闭、任务自然退出；
+    /// 重建 / stop() 时显式中止，避免旧监控残留。见 `bootstrap_mdns`。
+    monitor_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// 最近一次 mDNS 轻量重建的时间，用于重建冷却（避免监控误报 / 名字冲突引发重建风暴）。
+    last_mdns_rebuild: Option<Instant>,
     /// 最近一次 mDNS 注册时记录的本机出口 IP（字符串），供维护任务检测 IP 变化。
     last_local_ip: Option<String>,
 }
@@ -319,6 +325,8 @@ impl LanManager {
                 server_task: None,
                 reannounce_task: None,
                 maintain_task: None,
+                monitor_task: None,
+                last_mdns_rebuild: None,
                 last_local_ip: None,
             })),
             share_out_flag: Arc::new(AtomicBool::new(share_out)),
@@ -369,19 +377,126 @@ impl LanManager {
     pub async fn start(&self) {
         let manual_peers = {
             let mut inner = self.inner.lock().await;
-        // 设置回环检测用的本机 device_id。
-        let dev_id = inner.config.device_id.clone();
-        inner.store.set_self_device(dev_id);
-        // 新网络栈代际：使上一轮遗留的连接读任务失效（它们会在 register_conn 前因 gen 不匹配而跳过）。
-        inner.gen = inner.gen.wrapping_add(1);
-        // 未开启共享：不注册 mDNS / 不监听，避免未共享时被同网发现，
-        // 也确保关闭共享后本机从对端「在线设备」列表消失（而非残留 / 重复）。
-        if !inner.config.share_out {
-            return;
+            // 设置回环检测用的本机 device_id。
+            let dev_id = inner.config.device_id.clone();
+            inner.store.set_self_device(dev_id);
+            // 新网络栈代际：使上一轮遗留的连接读任务失效（它们会在 register_conn 前因 gen 不匹配而跳过）。
+            inner.gen = inner.gen.wrapping_add(1);
+            // 未开启共享：不注册 mDNS / 不监听，避免未共享时被同网发现，
+            // 也确保关闭共享后本机从对端「在线设备」列表消失（而非残留 / 重复）。
+            if !inner.config.share_out {
+                return;
+            }
+            if inner.mdns.is_some() {
+                return; // 已在运行
+            }
+            inner.config.manual_peers.clone()
+        };
+        // mDNS 发现层（注册本机 + 浏览 + 事件循环 + 快速宣告 + 维护 + 监控）。
+        // 生命周期与 TCP 层解耦：`bootstrap_mdns` 内部自锁，可被维护 / 监控任务单独重建。
+        self.bootstrap_mdns().await;
+        // TCP 监听（始终作为服务端，供较小 device_id 的对端连入）。
+        {
+            let mut inner = self.inner.lock().await;
+            // mDNS 启动失败（bootstrap_mdns 已打印原因）时不建监听，保持与旧行为一致。
+            if inner.mdns.is_none() {
+                return;
+            }
+            let listen_port = inner.config.listen_port;
+            let inner_l = self.inner.clone();
+            let app_l = self.app.clone();
+            let server_handle = tauri::async_runtime::spawn(async move {
+                let listener = match TcpListener::bind(("0.0.0.0", listen_port)).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("[lan] 监听 {listen_port} 失败（端口可能被占用）: {e}");
+                        // 明确通知前端：端口被占用，引导用户到设置中更换端口。
+                        let _ = app_l.emit(
+                            "lan-port-in-use",
+                            PortInUsePayload { port: listen_port },
+                        );
+                        return;
+                    }
+                };
+                loop {
+                    match listener.accept().await {
+                        Ok((socket, peer_addr)) => {
+                            let inner_cc = inner_l.clone();
+                            let app_cc = app_l.clone();
+                            tauri::async_runtime::spawn(async move {
+                                match tokio_tungstenite::accept_async(socket).await {
+                                    Ok(ws) => {
+                                        if let Err(e) =
+                                            accept_peer(ws, &inner_cc, &app_cc, None, peer_addr).await
+                                        {
+                                            eprintln!("[lan] 接受对端连接失败: {e}");
+                                        }
+                                    }
+                                    Err(e) => eprintln!("[lan] accept_async 失败: {e}"),
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("[lan] accept 失败: {e}");
+                            break;
+                        }
+                    }
+                }
+            });
+            // 记录监听任务句柄，stop() 时中止以释放端口（否则下次 start() 重绑会误报占用）。
+            inner.server_task = Some(server_handle);
         }
-        if inner.mdns.is_some() {
-            return; // 已在运行
+        // 注意：手动 peer 连接任务的拉起（`spawn_client_retry` 内部会再次 lock inner 写入
+        // client_stops）必须放在释放上方 inner 守卫【之后】执行，否则 `start()` 持锁 await
+        // 又去 lock 同一 Mutex 会形成死锁，使 `set_share_out`/`set_config` 永久卡在
+        // `inner.lock()`（表现为点「共享」后状态永远不变、菜单点不动）。
+        // 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
+        for addr in manual_peers {
+            let resolved = addr
+                .parse::<SocketAddr>()
+                .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
+            match resolved {
+                Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
+                Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
+            }
         }
+    }
+
+    /// 启动 / 重建 mDNS 发现层：注册本机服务 + 浏览 + 事件循环 + 快速宣告 + 30s 维护 + daemon 监控。
+    ///
+    /// 生命周期与 TCP 层**解耦**：只管理 mDNS（`inner.mdns` 与 mDNS 相关后台任务），不触碰
+    /// TCP 监听（`server_task`）与任何已建连接（`conns` / `known_peers` / `peer_names`）。
+    /// 因此发现层「假死」时可被静默替换：正在传输的文件与已建连接完全不受影响。
+    ///
+    /// 幂等：已有 daemon（重建场景）会先 shutdown 旧的再建新的；共享未开启时直接返回。
+    /// 先建后换——新 daemon 全部就绪后才替换旧 daemon，任何一步失败都不破坏现有状态。
+    ///
+    /// 背景：mdns-sd 是纯 Rust 实现（自建线程跑 daemon），不依赖系统 Bonjour/Avahi，
+    /// 长时间运行后可能出现「假死」（macOS 睡眠唤醒 / 网络切换后组播 socket 失效，或 daemon
+    /// 线程异常退出）——停止宣告且不再响应查询，但已建 TCP 连接仍正常，本机毫无感知，
+    /// 表现为对端「在线设备」列表长时间看不到本机、本机也发现不了对端。
+    /// 由 `start()`（首次启动）与 `rebuild_mdns_only()`（健康自愈：监控事件 / 周期强制重建）调用。
+    async fn bootstrap_mdns(&self) {
+        // 前置：共享开启 + 构造本机服务实例（携带最新出口 IP 的 TXT / A 记录）。
+        let (info, local_ip_str) = {
+            let inner = self.inner.lock().await;
+            if !inner.config.share_out {
+                return;
+            }
+            match build_service_info(&inner.config) {
+                Some(v) => v,
+                None => {
+                    eprintln!("[lan] 服务实例创建失败");
+                    return;
+                }
+            }
+        };
+        // 新建 daemon 并完成注册 / 浏览；失败则直接返回，不动现有状态（不降级）。
+        // 注意：`ServiceInfo::new` 的实例名参数只需「纯实例标签」（如 "my-pc"），
+        // 库内部会自行拼接为 `实例名.服务类型`（见 mdns-sd service_info.rs: fullname = "{name}.{ty_domain}"）。
+        // 切勿把完整服务名（含 "_clipstack._tcp.local." 后缀）当作实例名传入，
+        // 否则会生成 "my-pc._clipstack._tcp.local.._clipstack._tcp.local." 这样的畸形全名，
+        // 永远匹配不上 `browse("_clipstack._tcp.local.")`，导致两端互相发现失败。
         let mdns = match ServiceDaemon::new() {
             Ok(d) => d,
             Err(e) => {
@@ -389,30 +504,11 @@ impl LanManager {
                 return;
             }
         };
-
-        // 1) 注册本机服务实例。
-        // 注意：`ServiceInfo::new` 的实例名参数只需「纯实例标签」（如 "my-pc"），
-        // 库内部会自行拼接为 `实例名.服务类型`（见 mdns-sd service_info.rs: fullname = "{name}.{ty_domain}"）。
-        // 切勿把完整服务名（含 "_clipstack._tcp.local." 后缀）当作实例名传入，
-        // 否则会生成 "my-pc._clipstack._tcp.local.._clipstack._tcp.local." 这样的畸形全名，
-        // 永远匹配不上 `browse("_clipstack._tcp.local.")`，导致两端互相发现失败。
-        let (info, local_ip_str) = match build_service_info(&inner.config) {
-            Some(v) => v,
-            None => {
-                eprintln!("[lan] 服务实例创建失败");
-                return;
-            }
-        };
-        // 记录本次注册使用的出口 IP，供维护任务检测 IP 变化（变化时重建网络栈）。
-        inner.last_local_ip = local_ip_str;
-        // 克隆一份实例与守护句柄，供下方周期重宣告任务使用（避免占用 `info`/`mdns`）。
         let info_for_reannounce = info.clone();
         if let Err(e) = mdns.register(info) {
             eprintln!("[lan] mDNS 注册失败: {e}");
             return;
         }
-
-        // 2) 浏览同服务。
         let browse_rx = match mdns.browse(SERVICE_TYPE) {
             Ok(rx) => rx,
             Err(e) => {
@@ -421,9 +517,28 @@ impl LanManager {
             }
         };
         let mdns_daemon = mdns.clone();
-        inner.mdns = Some(mdns);
-
-        // 3) mDNS 事件循环。
+        // 快速宣告任务独占一份 daemon 克隆（mdns_daemon 还需供下方 monitor 使用）。
+        let mdns_for_reannounce = mdns_daemon.clone();
+        // 登记新 daemon，替换旧 daemon（先建后换）：shutdown 旧线程（其 browse / monitor
+        // channel 随之关闭，对应事件循环 / 监控任务自然退出），中止旧的后台任务。
+        // 重建期间共享被关（与用户操作竞态）：放弃本次替换，停掉新建的 daemon。
+        {
+            let mut inner = self.inner.lock().await;
+            if !inner.config.share_out {
+                let _ = mdns.shutdown();
+                return;
+            }
+            if let Some(old) = inner.mdns.take() {
+                let _ = old.shutdown();
+            }
+            inner.reannounce_task.take().map(|h| h.abort());
+            inner.maintain_task.take().map(|h| h.abort());
+            inner.monitor_task.take().map(|h| h.abort());
+            inner.mdns = Some(mdns);
+            // 记录本次注册使用的出口 IP，供维护任务检测 IP 变化（变化时重建网络栈）。
+            inner.last_local_ip = local_ip_str;
+        }
+        // mDNS 事件循环。
         let mgr_c = self.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(event) = browse_rx.recv() {
@@ -431,60 +546,12 @@ impl LanManager {
             }
             // 通道关闭 -> 守护已停
         });
-
-        // 4) TCP 监听（始终作为服务端，供较小 device_id 的对端连入）。
-        let listen_port = inner.config.listen_port;
-        let inner_l = self.inner.clone();
-        let app_l = self.app.clone();
-        let server_handle = tauri::async_runtime::spawn(async move {
-            let listener = match TcpListener::bind(("0.0.0.0", listen_port)).await {
-                Ok(l) => l,
-                Err(e) => {
-                    eprintln!("[lan] 监听 {listen_port} 失败（端口可能被占用）: {e}");
-                    // 明确通知前端：端口被占用，引导用户到设置中更换端口。
-                    let _ = app_l.emit(
-                        "lan-port-in-use",
-                        PortInUsePayload { port: listen_port },
-                    );
-                    return;
-                }
-            };
-            loop {
-                match listener.accept().await {
-                    Ok((socket, peer_addr)) => {
-                        let inner_cc = inner_l.clone();
-                        let app_cc = app_l.clone();
-                        tauri::async_runtime::spawn(async move {
-                            match tokio_tungstenite::accept_async(socket).await {
-                                Ok(ws) => {
-                                    if let Err(e) =
-                                        accept_peer(ws, &inner_cc, &app_cc, None, peer_addr).await
-                                    {
-                                        eprintln!("[lan] 接受对端连接失败: {e}");
-                                    }
-                                }
-                                Err(e) => eprintln!("[lan] accept_async 失败: {e}"),
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("[lan] accept 失败: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-        // 记录监听任务句柄，stop() 时中止以释放端口（否则下次 start() 重绑会误报占用）。
-        inner.server_task = Some(server_handle);
-
-        // 6) 有限次重宣告：mDNS 浏览仅在「发现新实例」时触发，若对端错过本机首次宣告
+        // 有限次重宣告：mDNS 浏览仅在「发现新实例」时触发，若对端错过本机首次宣告
         // （如本机宣告时其对端浏览尚未就绪、或其对端缓存了同名旧实例），将长时间看不到本机。
         // 在启动后 2s/4s/6s/13s/28s 多个时间点重新注册（2s 连发 3 次对抗组播丢包，
         // 符合 mDNS 新服务连发宣告的惯例），迫使对端重新解析本机服务，使新上线 / 重启后的
         // 设备能在数秒~十余秒内出现在对方在线列表。采用有限次数（而非无限循环）以避免
         // 后台常驻任务持续占用资源 / 反复触发注册。
-        // 注意：本段仍持有 inner 守卫（需引用下方定义的 mdns_daemon / info_for_reannounce），
-        // 故置于释放守卫之前；手动 peer 循环则放在释放守卫之后（见下方说明）。
         let inner_ra = self.inner.clone();
         let reannounce = tauri::async_runtime::spawn(async move {
             let delays = [
@@ -503,20 +570,23 @@ impl LanManager {
                 if !alive {
                     break;
                 }
-                let _ = mdns_daemon.register(info_for_reannounce.clone());
+                let _ = mdns_for_reannounce.register(info_for_reannounce.clone());
             }
         });
-        inner.reannounce_task = Some(reannounce);
-
-        // 7) 网络维护任务（30s 周期）：
+        self.inner.lock().await.reannounce_task = Some(reannounce);
+        // 网络维护任务（30s 周期）：
         // - 检测本机出口 IP 变化：离开局域网再回来 / 切换网络 / VPN 变更都会导致 IP 变化，
         //   而 mdns-sd 的 daemon 不感知接口/IP 变化、已注册实例的 A 记录仍是旧 IP，
         //   对端缓存旧 IP 后连接永远失败（表现为「需手动开关共享多次才能连上」）。
         //   检测到变化即 stop()+start() 重建网络栈：用新 IP 重新注册 mDNS、重绑监听端口；
         // - IP 未变时周期重宣告（用最新 IP 重建实例注册，刷新对端缓存），弥补 mdns-sd
-        //   默认 TTL 长（4500s≈75min）、对端缓存陈旧的问题。
-        // 重建通过独立 spawn 的 stop+start 执行（stop 会中止本维护任务，需先发起再退出；
-        // start() 会创建新的维护任务），避免自中止造成的竞态。
+        //   默认 TTL 长（4500s≈75min）、对端缓存陈旧的问题；
+        // - 每 10 个周期（5 分钟）强制轻量重建一次 mDNS 发现层：兜底 mdns-sd 长期运行后
+        //   「线程存活但组播 socket 失效」的静默故障（典型如 macOS 睡眠唤醒后 daemon 不再
+        //   宣告也不再响应查询，且无错误上报、IP 未变化，前两个分支均不触发）。
+        //   重建只换 daemon、不动 TCP 连接，正在同步的数据不受影响。
+        // 重建通过独立 spawn 执行（stop / bootstrap 会中止本维护任务，需先发起再退出；
+        // 重建后的 start / bootstrap 会创建新的维护任务），避免自中止造成的竞态。
         let inner_m = self.inner.clone();
         let mgr_m = self.clone();
         let maintain = tauri::async_runtime::spawn(async move {
@@ -524,8 +594,10 @@ impl LanManager {
             // tokio interval 首次 tick 立即触发：先消费掉，让第一轮在 30s 后执行
             // （启动初期的快速宣告由上方 reannounce 任务负责）。
             interval.tick().await;
+            let mut tick_count: u32 = 0;
             loop {
                 interval.tick().await;
+                tick_count = tick_count.wrapping_add(1);
                 let (alive, ip_now, last_ip) = {
                     let g = inner_m.lock().await;
                     let ip_now = local_ipv4().map(|i| i.to_string());
@@ -540,17 +612,21 @@ impl LanManager {
                 }
                 if let Some(ip) = ip_now {
                     if last_ip.as_deref() != Some(ip.as_str()) {
-                        // 出口 IP 变化：更新记录并重建网络栈。
+                        // 出口 IP 变化：更新记录并重建网络栈（全量 stop+start）。
                         {
                             let mut g = inner_m.lock().await;
                             g.last_local_ip = Some(ip);
                         }
-                        let m = mgr_m.clone();
-                        rebuild_for_ip_change(m);
+                        rebuild_for_ip_change(mgr_m.clone());
                         break;
                     }
                 }
-                // IP 未变：周期重宣告（重建实例以携带最新 TXT / A 记录，刷新对端缓存）。
+                // 强制周期重建（5 分钟一次）：轻量重建 mDNS 发现层，自愈 socket 静默失效。
+                if tick_count % 10 == 0 {
+                    rebuild_mdns_only(mgr_m.clone());
+                    break; // 重建会创建新的维护任务，本任务退出
+                }
+                // IP 未变、未到重建周期：周期重宣告（重建实例以携带最新 TXT / A 记录，刷新对端缓存）。
                 let cfg = inner_m.lock().await.config.clone();
                 if let Some(mdns) = inner_m.lock().await.mdns.clone() {
                     if let Some((info, _)) = build_service_info(&cfg) {
@@ -559,25 +635,40 @@ impl LanManager {
                 }
             }
         });
-        inner.maintain_task = Some(maintain);
-        // 在释放 inner 守卫前先把手动对端地址克隆出来。
-        inner.config.manual_peers.clone()
-    };
-    // 注意：手动 peer 连接任务的拉起（`spawn_client_retry` 内部会再次 lock inner 写入
-    // client_stops）必须放在释放上方 inner 守卫【之后】执行，否则 `start()` 持锁 await
-    // 又去 lock 同一 Mutex 会形成死锁，使 `set_share_out`/`set_config` 永久卡在
-    // `inner.lock()`（表现为点「共享」后状态永远不变、菜单点不动）。
-    // 5) 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
-    for addr in manual_peers {
-        let resolved = addr
-            .parse::<SocketAddr>()
-            .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
-        match resolved {
-            Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
-            Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
+        self.inner.lock().await.maintain_task = Some(maintain);
+        // daemon 监控：Error / 本机接口 IP 集合变化 / daemon 线程退出时触发轻量重建。
+        // - `DaemonEvent::Error`：daemon 内部出错；
+        // - `IpAdd` / `IpDel`：本机网络接口 / IP 集合变化（比维护任务仅比较出口 IP 更灵敏）；
+        // - 监控 channel 关闭（`recv` Err）：daemon 线程已退出——主动 shutdown（stop / 重建）
+        //   路径下本任务会被中止或由重建任务接管；若属异常死亡且无人接管，此处重建自愈。
+        if let Ok(monitor_rx) = mdns_daemon.monitor() {
+            let mgr_mon = self.clone();
+            let monitor = tauri::async_runtime::spawn(async move {
+                loop {
+                    match monitor_rx.recv() {
+                        Ok(DaemonEvent::Error(e)) => {
+                            eprintln!("[lan] mDNS daemon 错误: {e:?}，重建发现层");
+                            rebuild_mdns_only(mgr_mon.clone());
+                            break;
+                        }
+                        Ok(DaemonEvent::IpAdd(_)) | Ok(DaemonEvent::IpDel(_)) => {
+                            // 本机接口 / IP 集合变化：轻量重建，使对端能解析到新地址。
+                            rebuild_mdns_only(mgr_mon.clone());
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => {
+                            rebuild_mdns_only(mgr_mon.clone());
+                            break;
+                        }
+                    }
+                }
+            });
+            self.inner.lock().await.monitor_task = Some(monitor);
+        } else {
+            eprintln!("[lan] mDNS 监控通道建立失败");
         }
     }
-}
 
     /// 更新配置。
     ///
@@ -643,7 +734,7 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let (server_handle, reannounce_handle, maintain_handle, removed, aborts) = {
+        let (server_handle, reannounce_handle, maintain_handle, monitor_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
             let removed: Vec<String> = inner.conns.keys().cloned().collect();
@@ -677,11 +768,12 @@ impl LanManager {
             // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
             // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
             // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
-            // 取出监听/重宣告/维护任务句柄，在释放锁后再中止（避免持锁 await）。
+            // 取出监听/重宣告/维护/监控任务句柄，在释放锁后再中止（避免持锁 await）。
             (
                 inner.server_task.take(),
                 inner.reannounce_task.take(),
                 inner.maintain_task.take(),
+                inner.monitor_task.take(),
                 removed,
                 aborts,
             )
@@ -698,6 +790,11 @@ impl LanManager {
         }
         // 中止网络维护任务：共享关闭后无需再检测 IP 变化 / 周期宣告。
         if let Some(h) = maintain_handle {
+            h.abort();
+        }
+        // 中止 daemon 监控任务：daemon 已 shutdown，避免其在 channel 关闭时误触发重建
+        // （即使竞态触发，rebuild_mdns_only 也会因共享已关 / 冷却而放弃）。
+        if let Some(h) = monitor_handle {
             h.abort();
         }
         // 主动中止所有对端连接读任务：底层 socket 关闭（FIN），对端 read.next() 立即返回 None
@@ -1903,6 +2000,28 @@ fn rebuild_for_ip_change(m: LanManager) {
     tauri::async_runtime::spawn(async move {
         m.stop().await;
         m.start().await;
+    });
+}
+
+/// mDNS 发现层轻量重建：只替换 daemon（`bootstrap_mdns`），**不触碰任何 TCP 连接**。
+/// 供维护任务（5 分钟强制周期重建）与 daemon 监控任务（Error / 接口变化 / 线程退出）调用，
+/// 自愈 mdns-sd 长时间运行后「假死」——daemon 停止宣告且不再响应查询，但本机已建连接
+/// 与同步不受影响，表现为对端在线列表长时间看不到本机、本机也发现不了对端。
+///
+/// 30s 冷却：避免监控误报 / 接口抖动等场景在短时间内反复重建（重建会触发对端
+/// 缓存刷新与快速宣告，过于频繁徒增网络流量）。独立 spawn，与维护 / 监控任务解耦。
+fn rebuild_mdns_only(m: LanManager) {
+    tauri::async_runtime::spawn(async move {
+        {
+            let mut g = m.inner.lock().await;
+            if let Some(t) = g.last_mdns_rebuild {
+                if t.elapsed() < Duration::from_secs(30) {
+                    return; // 冷却期内，跳过本次重建
+                }
+            }
+            g.last_mdns_rebuild = Some(Instant::now());
+        }
+        m.bootstrap_mdns().await;
     });
 }
 
