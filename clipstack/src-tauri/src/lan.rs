@@ -568,11 +568,54 @@ impl LanManager {
             // 记录本次注册使用的出口 IP，供维护任务检测 IP 变化（变化时重建网络栈）。
             inner.last_local_ip = local_ip_str;
         }
-        // mDNS 事件循环。
+        // mDNS 事件循环：recv_async + select! 实现周期性重浏览。
+        // mdns-sd 的 browse 查询有指数退避（1s→2s→4s→...），若前几次响应丢失，
+        // 下次查询要等很久。每 15s 无对端时 stop_browse+browse 重发查询，
+        // 给对端更多响应机会；发现对端后停止重浏览（事件流自然持续投递）。
+        let mdns_for_rebrowse = mdns_daemon.clone();
         let mgr_c = self.clone();
         tauri::async_runtime::spawn(async move {
-            while let Ok(event) = browse_rx.recv() {
-                handle_mdns_event(event, &mgr_c).await;
+            let mut rx = browse_rx;
+            let mut rebrowse = tokio::time::interval(std::time::Duration::from_secs(15));
+            rebrowse.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            rebrowse.tick().await; // 消费首次立即触发
+            let mut count: u32 = 0;
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = rebrowse.tick() => {
+                        // 发现对端后不再重浏览
+                        let has_peers = !mgr_c.inner.lock().await.conns.is_empty();
+                        if has_peers || count >= 8 {
+                            continue;
+                        }
+                        count += 1;
+                        eprintln!("[lan] mDNS: 无对端连接，重新发送浏览查询 ({count}/8)");
+                        let _ = mdns_for_rebrowse.stop_browse(SERVICE_TYPE);
+                        match mdns_for_rebrowse.browse(SERVICE_TYPE) {
+                            Ok(new_rx) => rx = new_rx,
+                            Err(e) => eprintln!("[lan] mDNS: 重新浏览失败: {e}"),
+                        }
+                    }
+                    event = rx.recv_async() => {
+                        match event {
+                            Ok(ev) => handle_mdns_event(ev, &mgr_c).await,
+                            Err(_) => {
+                                // 通道关闭：可能是 stop_browse 导致旧 receiver 关闭，
+                                // 也可能是 daemon 停止。检查 daemon 是否还活着。
+                                let alive = mgr_c.inner.lock().await.mdns.is_some();
+                                if !alive {
+                                    break;
+                                }
+                                // daemon 还活着但 receiver 关闭：尝试重新 browse
+                                match mdns_for_rebrowse.browse(SERVICE_TYPE) {
+                                    Ok(new_rx) => rx = new_rx,
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // 通道关闭 -> 守护已停
         });
@@ -651,8 +694,11 @@ impl LanManager {
                         break;
                     }
                 }
-                // 强制周期重建（5 分钟一次）：轻量重建 mDNS 发现层，自愈 socket 静默失效。
-                if tick_count % 10 == 0 {
+                // 强制周期重建：无对端时每 4 周期（2 分钟），有对端时每 10 周期（5 分钟）。
+                // 无对端时更激进地重建，自愈 socket 静默失效 / 组播 join 丢失等问题。
+                let has_peers = !inner_m.lock().await.conns.is_empty();
+                let rebuild_every = if has_peers { 10 } else { 4 };
+                if tick_count % rebuild_every == 0 {
                     rebuild_mdns_only(mgr_m.clone());
                     break; // 重建会创建新的维护任务，本任务退出
                 }
