@@ -1109,9 +1109,25 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                     .or_else(|| addrs.first())
                     .copied()
             };
+            // A 记录兜底：若解析出的地址是 unspecified（0.0.0.0，对端本机出口 IP 探测失败
+            // 退化的 A 记录），回退 TXT `ip` 字段（对端广播时写入的真实局域网 IP）。
+            let addr = match addr {
+                Some(a) if !a.ip().is_unspecified() => Some(a),
+                _ => info
+                    .get_property_val_str("ip")
+                    .and_then(|s| s.parse::<IpAddr>().ok())
+                    .filter(|ip| !ip.is_unspecified() && !ip.is_loopback())
+                    .map(|ip| SocketAddr::new(ip, info.get_port())),
+            };
             let addr = match addr {
                 Some(a) => a,
-                None => return,
+                None => {
+                    // 低频：对端 mDNS 广播无 A 记录可解析。
+                    eprintln!(
+                        "[lan] mDNS: 对端 {device_id} 无可解析地址（可能 A 记录退化 0.0.0.0 或记录过期），已跳过"
+                    );
+                    return;
+                }
             };
             // 角色判定：本机 device_id 较大 -> 我是客户端，向对端发起；否则我监听，等对方连。
             let my_id = inner.lock().await.config.device_id.clone();
@@ -1959,12 +1975,14 @@ fn build_envelope(
 }
 
 /// 取本机默认出接口的 IPv4 地址（用于 mDNS 广播 A 记录，供对端连入）。
-/// 通过向公网地址发起 UDP connect（不发包）读取本地出口 IP，跨平台可用。
+/// 两层策略：先向公网地址发起 UDP connect（不发包）读取本机出口 IP（跨平台可用，
+/// 多网卡 / VPN 下能选中「默认路由出口」）；全部探测失败时兜底枚举本机网卡，
+/// 取第一个非回环 / 非 link-local / 非点对点隧道、优先私有网段的 IPv4——否则在
+/// 禁止出公网 UDP 的网络（典型如公司防火墙）A 记录会退化为 0.0.0.0，对端永远连不上。
 pub(crate) fn local_ipv4() -> Option<IpAddr> {
     // 通过向若干公共 DNS 发起 UDP connect 探测本机出口 IPv4。
     // 程序启动早期网络路由可能尚未就绪（或某 DNS 被网络屏蔽），
-    // 故逐一尝试多个目标，任一可达即可拿到真实出口地址；全部失败才返回 None
-    // （调用方会退化为 0.0.0.0，并依赖启动兜底逻辑在稍后重启时重新注册真实地址）。
+    // 故逐一尝试多个目标，任一可达即可拿到真实出口地址。
     const PROBES: [&str; 3] = ["8.8.8.8:80", "1.1.1.1:80", "9.9.9.9:80"];
     for target in PROBES {
         if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
@@ -1977,7 +1995,38 @@ pub(crate) fn local_ipv4() -> Option<IpAddr> {
             }
         }
     }
+    // 兜底：枚举本机网卡（覆盖 UDP 探测被网络策略拦截的场景）。
+    if let Ok(ifs) = if_addrs::get_if_addrs() {
+        let mut fallback: Option<IpAddr> = None;
+        for iface in ifs {
+            // 排除回环 / 未启用 / link-local(169.254.x.x) / 点对点隧道（VPN utun 等，对端不可达）。
+            if iface.is_loopback() || !iface.is_oper_up() || iface.is_p2p() {
+                continue;
+            }
+            if let IpAddr::V4(v4) = iface.ip() {
+                if v4.is_link_local() || v4.is_unspecified() {
+                    continue;
+                }
+                let ip = IpAddr::V4(v4);
+                if is_private_ipv4(v4) {
+                    return Some(ip); // 私有网段优先（局域网内对端可路由）
+                }
+                if fallback.is_none() {
+                    fallback = Some(ip);
+                }
+            }
+        }
+        if fallback.is_some() {
+            return fallback;
+        }
+    }
     None
+}
+
+/// 是否为私有网段 IPv4（RFC 1918：10/8、172.16/12、192.168/16）。
+fn is_private_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let o = ip.octets();
+    o[0] == 10 || (o[0] == 172 && (16..=31).contains(&o[1])) || (o[0] == 192 && o[1] == 168)
 }
 
 /// mDNS 实例标签：仅「纯实例名」，绝不可附带服务类型后缀。
@@ -2461,6 +2510,27 @@ mod tests {
     fn default_device_name_is_nonempty() {
         // 跨平台获取机器名，任一路径（含回退 "ClipStack"）都应返回非空字符串。
         assert!(!default_device_name().is_empty());
+    }
+
+    #[test]
+    fn local_ipv4_returns_usable_address() {
+        // 本机（联网 macOS）应能取到非回环、非 0.0.0.0 的 IPv4（UDP 探测或网卡枚举兜底）。
+        let ip = local_ipv4().expect("本机应能取到 IPv4 地址");
+        assert!(!ip.is_loopback(), "不得取回环地址");
+        assert!(!ip.is_unspecified(), "不得退化 0.0.0.0");
+        assert!(ip.is_ipv4(), "应为 IPv4");
+    }
+
+    #[test]
+    fn private_ipv4_classification() {
+        // RFC 1918 私有网段判定：10/8、172.16/12、192.168/16 为真，其余为假。
+        assert!(is_private_ipv4("10.1.2.3".parse().unwrap()));
+        assert!(is_private_ipv4("192.168.1.5".parse().unwrap()));
+        assert!(is_private_ipv4("172.16.0.1".parse().unwrap()));
+        assert!(is_private_ipv4("172.31.255.254".parse().unwrap()));
+        assert!(!is_private_ipv4("172.32.0.1".parse().unwrap())); // 172.32 不在 172.16/12
+        assert!(!is_private_ipv4("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ipv4("169.254.1.1".parse().unwrap())); // link-local 不属于私有网段
     }
 
     #[test]

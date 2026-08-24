@@ -37,6 +37,7 @@ trash = "5"                        # 跨平台移动文件/目录到系统回收
 # ===== 局域网共享（L2/L3，见 clipstack-lan-sync-design.md）=====
 clipstack-protocol = { path = "../../clipstack-protocol" }  # 共享协议库
 mdns-sd = "0.20"                  # 纯 Rust mDNS 发现（不依赖系统 Bonjour/Avahi）
+if-addrs = "0.15"                 # local_ipv4() 兜底：UDP 探测失败时枚举本机网卡非回环 IPv4（公司网络常拦出公网 UDP）
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 tokio-tungstenite = "0.29"        # WebSocket（mesh 直连传输）
 futures-util = "0.3"              # WS 流处理
