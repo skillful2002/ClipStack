@@ -164,21 +164,14 @@ pub fn run() {
             // 配置缺省（组/密钥空，share_out 关闭）；用户在前端设置后通过 lan_set_config 重启。
             let lan = LanManager::new(app.handle().clone(), db_state.clone());
             app.manage(lan.clone());
+            // 注意：不再做「peers 空就每 3s stop+start」的启动重试循环。
+            // 原因：① start() 内部的 reannounce 任务（2s×3+7s+15s 连发 5 次宣告）与
+            // maintain 任务（30s 周期重宣告）已覆盖「启动初期网络未就绪 / 对端错过首次宣告」；
+            // ② 该循环每 3s 重建一次 daemon（stop+start 会 shutdown 并新建 mDNS daemon /
+            // 重绑 TCP 监听），与用户开关共享 / 保存配置触发的重建竞态交错，曾导致
+            // 「监听端口被占用」「旧 daemon socket 未释放、resolve 响应被旧 socket 截获」。
             tauri::async_runtime::spawn(async move {
                 lan.start().await;
-                // 启动初期网络 / mDNS 可能尚未就绪（如 Wi-Fi 未完成关联、对端尚未重新宣告，
-                // 或对端仍缓存着本机旧实例、未触发重新发现），导致首次发现失败，表现为
-                // 「重启后需手动点一次保存才能在共享列表里看到设备」。
-                // 周期性兜底：每隔几秒若仍未连上任何对端，则重启 mDNS（重注册 + 重浏览，
-                // 触发对端重新发现本机），直到连上或超时（最多约 30s，避免无限重启）。
-                for _ in 0..10 {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    if !lan.peers().await.is_empty() {
-                        break;
-                    }
-                    lan.stop().await;
-                    lan.start().await;
-                }
             });
 
             // 首次运行判定与窗口显隐：在 setup 阶段同步完成，确保窗口在事件循环启动前就已显示，
