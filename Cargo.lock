@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "clipstack"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "aes-gcm",
  "arboard",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "clipstack-protocol"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "serde",
  "serde_json",
