@@ -1072,7 +1072,14 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
         ServiceEvent::ServiceResolved(info) => {
             let device_id = match info.get_property_val_str("device_id") {
                 Some(d) => d.to_string(),
-                None => return,
+                None => {
+                    // 低频：广播 TXT 缺失 device_id（stale 记录），打印实例全名便于定位。
+                    eprintln!(
+                        "[lan] mDNS: 忽略无 device_id 的对端广播 (fullname={})",
+                        info.get_fullname()
+                    );
+                    return;
+                }
             };
             let fp = info.get_property_val_str("group_fp").unwrap_or("").to_string();
             let name = info.get_property_val_str("name").unwrap_or("").to_string();
@@ -1084,6 +1091,13 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
             {
                 let mut g = inner.lock().await;
                 if fp != my_fp {
+                    // 高频（对端 reannounce 周期触发）：门控只打首次，避免刷屏。
+                    static WARNED_FP: AtomicBool = AtomicBool::new(false);
+                    if !WARNED_FP.swap(true, Ordering::SeqCst) {
+                        eprintln!(
+                            "[lan] mDNS: 对端 {device_id} group_fp 不匹配（共享组/密钥不一致），已跳过"
+                        );
+                    }
                     return;
                 }
                 // 记录对端友好名（供共享列表展示），优先于握手 hello。
@@ -1143,6 +1157,7 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                     || my_ip.map_or(false, |m| m == addr.ip())
                     || my_ip.map_or(false, |m| m.to_string() == txt_ip);
                 if is_self {
+                    eprintln!("[lan] mDNS: 忽略自身反射广播 (device_id={device_id}, addr={addr})");
                     return;
                 }
                 // 真实碰撞：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
@@ -1152,14 +1167,27 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 tauri::async_runtime::spawn(async move {
                     m.resolve_device_id_collision().await;
                 });
+                eprintln!(
+                    "[lan] mDNS: 检测到 device_id 碰撞 ({device_id})，正在重生本机 device_id 并重启发现"
+                );
                 return;
             }
             if device_id >= my_id {
+                // 高频（正常场景每次 ServiceResolved 都会命中）：门控只打首次。
+                static WARNED_LISTEN: AtomicBool = AtomicBool::new(false);
+                if !WARNED_LISTEN.swap(true, Ordering::SeqCst) {
+                    eprintln!("[lan] mDNS: 对端 {device_id} 角色较小（我监听，等对方连入）");
+                }
                 return; // 我较小或相等 -> 仅监听
             }
             // 名称缺失守卫：mDNS TXT 中无 name 字段（对端停止共享后的 stale 记录、
             // 或广播尚未完整）时不发起连接，避免注册「无名」连接导致在线列表显示为 UUID。
             if name.is_empty() {
+                // 中频（对端广播未完整时可能触发）：门控只打首次。
+                static WARNED_NO_NAME: AtomicBool = AtomicBool::new(false);
+                if !WARNED_NO_NAME.swap(true, Ordering::SeqCst) {
+                    eprintln!("[lan] mDNS: 对端 {device_id} TXT 无 name 字段，跳过建连（stale 记录）");
+                }
                 return;
             }
             // 记录已知对端并发起客户端连接（带重连）。
@@ -1178,6 +1206,11 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 (has_conn, stale_stop)
             };
             if has_conn {
+                // 高频（reannounce 周期触发）：门控只打首次。
+                static WARNED_HAS_CONN: AtomicBool = AtomicBool::new(false);
+                if !WARNED_HAS_CONN.swap(true, Ordering::SeqCst) {
+                    eprintln!("[lan] mDNS: 对端 {device_id} 已有活跃连接，跳过重复建连");
+                }
                 return;
             }
             if let Some(stop) = stale_stop {
@@ -1276,7 +1309,9 @@ async fn spawn_client_retry(
                     tokio::time::sleep(Duration::from_secs(backoff)).await;
                     backoff = (backoff * 2).min(30);
                 }
-                Err(_) => {
+                Err(e) => {
+                    // 诊断日志：若目标地址是 0.0.0.0（本机 mDNS A 记录退化）会在此直接暴露。
+                    eprintln!("[lan] 连接 {addr} 失败: {e}（{backoff}s 后重试）");
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
@@ -2046,6 +2081,18 @@ fn build_service_info(cfg: &LanConfig) -> Option<(ServiceInfo, Option<String>)> 
     let instance = lan_instance_name(&cfg.device_name);
     let host = format!("{}.local.", sanitize_name(&cfg.device_name));
     let local_ip = local_ipv4();
+    // 诊断日志：出口 IP 探测失败（典型于公司网络拦截出公网 UDP）时 A 记录退化为 0.0.0.0，
+    // 对端解析到 0.0.0.0 永远连不上，表现为「自动共享失败、手动对端成功」。仅打首次避免刷屏。
+    {
+        static WARNED_NO_IP: AtomicBool = AtomicBool::new(false);
+        if local_ip.is_none() && !WARNED_NO_IP.swap(true, Ordering::SeqCst) {
+            eprintln!(
+                "[lan] 警告: 出口 IPv4 探测失败（8.8.8.8/1.1.1.1/9.9.9.9 UDP 均不可达），\
+                 mDNS A 记录将退化为 0.0.0.0，对端将无法通过自动发现连入；\
+                 请改用「手动对端地址」或修复本机网络。"
+            );
+        }
+    }
     let ip_arg: IpAddr = local_ip.unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
     let mut props: HashMap<String, String> = HashMap::new();
     props.insert("device_id".into(), cfg.device_id.clone());
