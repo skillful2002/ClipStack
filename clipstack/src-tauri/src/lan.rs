@@ -1290,6 +1290,16 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 );
             }
         }
+        // 诊断盲区：mdns-sd 看到对端的 PTR（ServiceFound）但尚未 resolve 出
+        // SRV/TXT/A（ServiceResolved）时，原实现静默忽略。若在此停住说明浏览的
+        // 查询/响应链路有问题（本机发的 SRV 查询对端未响应，或响应本机没收全）。
+        ServiceEvent::ServiceFound(_, fullname) => {
+            // 门控只打首次：对端 reannounce 周期会反复触发，避免刷屏。
+            static WARNED_FOUND: AtomicBool = AtomicBool::new(false);
+            if !WARNED_FOUND.swap(true, Ordering::SeqCst) {
+                eprintln!("[lan] mDNS: 浏览到服务 PTR 但尚未 Resolved: {fullname}");
+            }
+        }
         _ => {}
     }
 }
