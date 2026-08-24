@@ -504,6 +504,25 @@ impl LanManager {
                 }
             }
         };
+        // 先停旧 daemon、等其线程真正退出（socket / 组播 join 完全释放）再建新的。
+        // `shutdown()` 只发 Exit 命令（异步），必须 recv 其返回的 DaemonStatus 才能确认
+        // 退出完成；否则新旧 daemon 并存（SO_REUSEPORT 双 socket 同时 join 5353），
+        // resolve 查询的 unicast 响应可能被分发到即将退出的旧 socket 而丢失——mdns-sd
+        // 最多重试 3 次查询后永久放弃，表现为「有 PTR 却永不 ServiceResolved」（自动发现
+        // 失败，手动对端正常）。这也是 stop()+start() 快速往返后端口/资源未释放的根源。
+        let old_mdns = { self.inner.lock().await.mdns.take() };
+        if let Some(old) = old_mdns {
+            if let Ok(status_rx) = old.shutdown() {
+                // flume Receiver::recv 为同步阻塞调用：放 spawn_blocking，避免卡住异步 runtime；
+                // 加 2s 超时保护，防止 daemon 线程异常卡住时重建路径永久阻塞。
+                let rx_fut = tauri::async_runtime::spawn_blocking(move || status_rx.recv());
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), rx_fut).await;
+            }
+        }
+        // 停旧期间共享可能已被关（与用户操作竞态）：放弃本次重建。
+        if !self.inner.lock().await.config.share_out {
+            return;
+        }
         // 新建 daemon 并完成注册 / 浏览；失败则直接返回，不动现有状态（不降级）。
         // 注意：`ServiceInfo::new` 的实例名参数只需「纯实例标签」（如 "my-pc"），
         // 库内部会自行拼接为 `实例名.服务类型`（见 mdns-sd service_info.rs: fullname = "{name}.{ty_domain}"）。
@@ -532,17 +551,15 @@ impl LanManager {
         let mdns_daemon = mdns.clone();
         // 快速宣告任务独占一份 daemon 克隆（mdns_daemon 还需供下方 monitor 使用）。
         let mdns_for_reannounce = mdns_daemon.clone();
-        // 登记新 daemon，替换旧 daemon（先建后换）：shutdown 旧线程（其 browse / monitor
-        // channel 随之关闭，对应事件循环 / 监控任务自然退出），中止旧的后台任务。
+        // 登记新 daemon，中止旧的后台任务（旧 daemon 的 browse / monitor channel 随之
+        // 关闭，对应事件循环 / 监控任务自然退出）。旧 daemon 线程已在函数开头等待退出，
+        // 此处只负责替换状态与清理后台任务。
         // 重建期间共享被关（与用户操作竞态）：放弃本次替换，停掉新建的 daemon。
         {
             let mut inner = self.inner.lock().await;
             if !inner.config.share_out {
                 let _ = mdns.shutdown();
                 return;
-            }
-            if let Some(old) = inner.mdns.take() {
-                let _ = old.shutdown();
             }
             inner.reannounce_task.take().map(|h| h.abort());
             inner.maintain_task.take().map(|h| h.abort());
@@ -748,7 +765,7 @@ impl LanManager {
 
     /// 停止发现与所有连接。
     pub async fn stop(&self) {
-        let (server_handle, reannounce_handle, maintain_handle, monitor_handle, removed, aborts) = {
+        let (mdns_to_stop, server_handle, reannounce_handle, maintain_handle, monitor_handle, removed, aborts) = {
             let mut inner = self.inner.lock().await;
             // 收集将被移除的对端，便于在共享关闭时广播离线事件。
             let removed: Vec<String> = inner.conns.keys().cloned().collect();
@@ -762,9 +779,6 @@ impl LanManager {
             // 不再把对端插回 conns，从而消除「stop 清空 conns 后读任务又把设备加回」的竞态
             // （前端 refreshPeers 整体覆盖 peers，读到脏 conns 会让「在线设备」面板残留已断开设备）。
             inner.gen = inner.gen.wrapping_add(1);
-            if let Some(mdns) = inner.mdns.take() {
-                let _ = mdns.shutdown();
-            }
             for stop in inner.client_stops.values() {
                 stop.store(true, Ordering::SeqCst);
             }
@@ -788,8 +802,10 @@ impl LanManager {
             // 注意：不清空 `peer_names`。它是「device_id -> 友好名」的发现缓存，
             // 与连接状态无关；保留它可避免配置热更新 / 重启后发现的对端来源回退为设备 ID。
             // 对端重连后会通过 mDNS TXT / 握手 hello 重新刷新名称，旧名称不会造成误显示。
-            // 取出监听/重宣告/维护/监控任务句柄，在释放锁后再中止（避免持锁 await）。
+            // 取出 mDNS daemon 与监听/重宣告/维护/监控任务句柄，在释放锁后再关闭/中止
+            // （避免持锁 await）。
             (
+                inner.mdns.take(),
                 inner.server_task.take(),
                 inner.reannounce_task.take(),
                 inner.maintain_task.take(),
@@ -798,6 +814,19 @@ impl LanManager {
                 aborts,
             )
         };
+        // 等待 mDNS daemon 线程真正退出：`shutdown()` 只发 Exit 命令（异步），必须 recv 其
+        // 返回的 DaemonStatus 才能确认旧 socket / 组播 join 已释放。否则 stop() 后立即 start()
+        // 会新旧 daemon 并存（SO_REUSEPORT 双 socket 同时 join 5353），resolve 查询的 unicast
+        // 响应可能被分发到即将退出的旧 socket 而丢失——mdns-sd 最多重试 3 次后永久放弃，
+        // 表现为「有 PTR 却永不 ServiceResolved」（自动发现失败，手动对端正常）。
+        if let Some(mdns) = mdns_to_stop {
+            if let Ok(status_rx) = mdns.shutdown() {
+                // flume Receiver::recv 为同步阻塞调用：放 spawn_blocking，避免卡住异步 runtime；
+                // 加 2s 超时保护，防止 daemon 线程异常卡住时 stop() 永久阻塞（界面冻结）。
+                let rx_fut = tauri::async_runtime::spawn_blocking(move || status_rx.recv());
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), rx_fut).await;
+            }
+        }
         // 中止 TCP 监听任务并等待其退出，确保监听端口被释放，
         // 否则 set_config 重启时发现（start）会因旧监听仍占用端口而误报「端口被占用」。
         if let Some(h) = server_handle {
