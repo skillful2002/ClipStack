@@ -1139,7 +1139,10 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 g.peer_fullnames
                     .insert(device_id.clone(), info.get_fullname().to_string());
             }
-            // 取对端地址（优先非回环；无则取首个）。
+            // 取对端地址：优先 IPv4（局域网共享主路径）。IPv6 link-local（fe80:: 等）
+            // 不带 scope id 时无路由（connect 报 No route to host），且跨设备常不可达，
+            // 若不加过滤会选到它导致连接永远失败——手动对端填 IPv4 能连、自动发现失败
+            // 的症状即源于此。其次排除 link-local / unspecified。
             let addr = {
                 let addrs: Vec<SocketAddr> = info
                     .get_addresses()
@@ -1148,7 +1151,13 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                     .collect();
                 addrs
                     .iter()
-                    .find(|a| !a.ip().is_loopback())
+                    .find(|a| a.ip().is_ipv4() && !a.ip().is_loopback())
+                    .or_else(|| addrs.iter().find(|a| a.ip().is_ipv4()))
+                    .or_else(|| {
+                        addrs
+                            .iter()
+                            .find(|a| !a.ip().is_loopback() && !a.ip().is_unspecified())
+                    })
                     .or_else(|| addrs.first())
                     .copied()
             };
