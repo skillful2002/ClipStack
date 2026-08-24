@@ -246,6 +246,11 @@ struct Inner {
     conns: HashMap<String, ConnHandle>,
     /// 正在进行的客户端连接任务停止标志（按对端 device_id）。
     client_stops: HashMap<String, Arc<AtomicBool>>,
+    /// 手动对端连接任务停止标志（按地址 addr.to_string()）。
+    /// 手动对端（peer_id=None）没有 mDNS 的 ServiceRemoved 清理路径，只能由 stop() 整体
+    /// 置位并清空、start() 按当前 manual_peers 配置重建；否则任务成为永不停止的僵尸重连任务，
+    /// 表现为「删除手动对端后共享仍成功」（程序未退出期间持续拨号旧地址）。
+    manual_stops: HashMap<String, Arc<AtomicBool>>,
     /// 已知的组内对端（device_id -> 最近地址），用于断线重连判定。
     known_peers: HashMap<String, SocketAddr>,
     /// 已知对端名称（device_id -> 友好名），来源 mDNS TXT 或握手 hello，用于共享列表展示。
@@ -314,6 +319,7 @@ impl LanManager {
                 store: ClipStore::new(""), // device_id 在 start() 后设置
                 conns: HashMap::new(),
                 client_stops: HashMap::new(),
+                manual_stops: HashMap::new(),
                 known_peers: HashMap::new(),
                 peer_names: HashMap::new(),
                 peer_ips: HashMap::new(),
@@ -451,12 +457,19 @@ impl LanManager {
         // 又去 lock 同一 Mutex 会形成死锁，使 `set_share_out`/`set_config` 永久卡在
         // `inner.lock()`（表现为点「共享」后状态永远不变、菜单点不动）。
         // 手动 peer：每个地址起一个客户端连接任务。省略端口时自动补 LAN_PORT。
+        // 去重：manual_peers 未去重（前端按行输入），重复地址会覆盖上一个任务的
+        // stop 标志（见 spawn_client_retry 的 manual_stops 登记），导致 stop() 无法
+        // 中止第一个任务——故只对每个唯一地址拉起一次连接。
+        let mut seen = std::collections::HashSet::new();
         for addr in manual_peers {
             let resolved = addr
                 .parse::<SocketAddr>()
                 .or_else(|_| format!("{addr}:{LAN_PORT}").parse::<SocketAddr>());
             match resolved {
-                Ok(sa) => spawn_client_retry(sa, &self.inner, &self.app, None).await,
+                Ok(sa) if seen.insert(sa) => {
+                    spawn_client_retry(sa, &self.inner, &self.app, None).await
+                }
+                Ok(_) => {} // 重复地址，跳过
                 Err(_) => eprintln!("[lan] 忽略无法解析的手动对端地址: {addr}"),
             }
         }
@@ -704,6 +717,7 @@ impl LanManager {
                 || old.share_key != cfg.share_key
                 || old.listen_port != cfg.listen_port
                 || old.share_out != cfg.share_out
+                || old.manual_peers != cfg.manual_peers
         };
         let share_changed = {
             let inner = self.inner.lock().await;
@@ -755,6 +769,12 @@ impl LanManager {
                 stop.store(true, Ordering::SeqCst);
             }
             inner.client_stops.clear();
+            // 手动对端任务同样置位并清空（任务自身无 ServiceRemoved 清理路径，只能靠这里收尾），
+            // 否则其继续退避重连旧地址，形成「删除手动对端后共享仍成功」的僵尸任务。
+            for stop in inner.manual_stops.values() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            inner.manual_stops.clear();
             // 收集所有对端连接读任务的中止句柄：释放锁后再 abort，才能真正关闭底层
             // socket（发 FIN），使对端立即检测到断线并 remove_conn，从「在线设备」列表移除本机。
             // 仅靠 drop `tx`（写半边）不够：读任务仍存活、持读半边并自动回 Pong，
@@ -1206,6 +1226,15 @@ async fn spawn_client_retry(
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(id) = &peer_id {
         inner.lock().await.client_stops.insert(id.clone(), stop.clone());
+    } else {
+        // 手动对端：无 device_id 可用，按地址登记停止标志，使 stop() 能中止本任务。
+        // 否则该任务永不停止、持续重连旧地址——删除手动对端配置后仍在拨号，
+        // 表现为「必须手动指定一次对端后共享才成功」的僵尸连接。
+        inner
+            .lock()
+            .await
+            .manual_stops
+            .insert(addr.to_string(), stop.clone());
     }
     let inner = inner.clone();
     let app = app.clone();
