@@ -1237,11 +1237,25 @@ async fn handle_mdns_event(event: ServiceEvent, mgr: &LanManager) {
                 // TXT ip 与本机出口 IP 一致（或回环）即视为自身反射，忽略即可。
                 let my_ip = local_ipv4();
                 let txt_ip = info.get_property_val_str("ip").unwrap_or("");
+                let txt_ip_parsed = txt_ip.parse::<IpAddr>().ok();
+                // 自识别分级判定（逐级放宽，避免网络切换瞬间漏判导致「自己连上自己」）：
+                // ① 解析地址是回环；
+                // ② 解析地址 / TXT 广播 IP 属于本机任一网卡——用接口枚举，不受
+                //    `local_ipv4()` 出口探测滞后（返回旧 IP 或 None）影响，这是切换
+                //    网络场景的关键兜底；
+                // ③ 与本机当前出口 IP 相同。
+                // 漏判的代价远大于误判：漏判会触发下面的 device_id 碰撞重生，重生后
+                // 旧 id 又被当成另一台设备，本机连上自己（在线列表出现「自己带 IP」条目）；
+                // 而误判最坏只是忽略一条 mDNS 记录。
                 let is_self = addr.ip().is_loopback()
+                    || is_local_ip(addr.ip())
+                    || txt_ip_parsed.map_or(false, is_local_ip)
                     || my_ip.map_or(false, |m| m == addr.ip())
                     || my_ip.map_or(false, |m| m.to_string() == txt_ip);
                 if is_self {
-                    eprintln!("[lan] mDNS: 忽略自身反射广播 (device_id={device_id}, addr={addr})");
+                    eprintln!(
+                        "[lan] mDNS: 忽略自身反射广播 (device_id={device_id}, addr={addr}, txt_ip={txt_ip})"
+                    );
                     return;
                 }
                 // 真实碰撞：两端 device_id 完全相同（克隆 / 系统还原 / 拷贝配置所致）。
@@ -1366,6 +1380,20 @@ async fn spawn_client_retry(
     app: &AppHandle,
     peer_id: Option<String>,
 ) {
+    // 防自连：目标地址属于本机任一网卡（含回环）时直接放弃，绝不向自己发起连接。
+    // 场景：device_id 碰撞重生（resolve_device_id_collision）后，本机 mDNS 缓存 / 反射
+    // 里仍残留「旧 device_id」的记录——它与本机当前 id 不同，能绕过 handle_mdns_event
+    // 与 register_conn 中基于 device_id 的自连守卫，最终本机连上本机，在线列表多出
+    // 一条「自己带 IP」的条目。地址层兜底可覆盖「device_id 已经变了」的所有情况
+    // （切换网络后重生、手动对端误填本机地址等）。
+    if is_local_ip(addr.ip()) {
+        // 门控只打首次：本机 mDNS 周期重宣告会反复解析到自身记录，避免刷屏。
+        static WARNED_SELF_CONN: AtomicBool = AtomicBool::new(false);
+        if !WARNED_SELF_CONN.swap(true, Ordering::SeqCst) {
+            eprintln!("[lan] 忽略连向本机地址的对端 {addr}（防自连），不发起连接");
+        }
+        return;
+    }
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(id) = &peer_id {
         inner.lock().await.client_stops.insert(id.clone(), stop.clone());
@@ -1909,6 +1937,15 @@ async fn register_conn(
         if device_id == my_id {
             return;
         }
+        // 地址层自连守卫：连向本机任一网卡地址的连接一律拒绝登记。
+        // device_id 守卫只能挡住「当前身份」的自连；device_id 碰撞重生后的旧 id、
+        // mDNS 残留记录、手动对端误填本机地址等场景下对端 id 与本机不同，
+        // 只能靠地址拦截。否则本机被登记成自己的在线对端，列表出现「自己带 IP」的条目。
+        // 这是最后一道保险：`spawn_client_retry` 已在发起侧拦截，此处覆盖服务端
+        // accept 入口（对端主动连入）与手动对端等其它路径。
+        if is_local_ip(addr.ip()) {
+            return;
+        }
         // 共享已关闭：任何连接都不得登记进「在线设备」列表。否则 stop() 清空 conns 后，
         // 在途的 accept_peer（已捕获 stop 之后的新 gen）会再次把对端插回 conns，造成
         // 「关闭共享后设备仍在在线列表 / 下线又复活 / 同步已停却显示在线」的假在线。
@@ -2150,6 +2187,28 @@ pub(crate) fn local_ipv4() -> Option<IpAddr> {
         }
     }
     None
+}
+
+/// 检查给定 IP 是否属于本机任一网络接口（回环也算）。
+///
+/// 用于 mDNS「自识别」兜底：切换网络（Wi-Fi 换网 / 插拔网线 / VPN 上下线）的瞬间，
+/// `local_ipv4()` 的出口探测可能仍返回旧 IP，或路由尚未就绪而返回 `None`，仅靠它
+/// 比对会把自己的广播误判成「对端」——进而触发 device_id 碰撞重生；重生后旧 id 又被
+/// 当成另一台设备，本机主动连上自己，在线列表就多出一条「自己带 IP」的条目。
+/// 接口枚举不受出口路由影响，能稳定判断「这个地址是我自己的某张网卡」。
+///
+/// 注意：这里刻意**不**过滤 `is_oper_up` / `is_p2p` / link-local。自识别宁可偏保守
+/// （误认成自己最坏只是忽略一条 mDNS 记录），也绝不能漏判（漏判就会自己连自己）。
+fn is_local_ip(ip: IpAddr) -> bool {
+    if ip.is_loopback() {
+        return true;
+    }
+    match if_addrs::get_if_addrs() {
+        Ok(ifs) => ifs
+            .iter()
+            .any(|iface| !iface.is_loopback() && iface.ip() == ip),
+        Err(_) => false,
+    }
 }
 
 /// 是否为私有网段 IPv4（RFC 1918：10/8、172.16/12、192.168/16）。
@@ -2660,6 +2719,34 @@ mod tests {
         assert!(!ip.is_loopback(), "不得取回环地址");
         assert!(!ip.is_unspecified(), "不得退化 0.0.0.0");
         assert!(ip.is_ipv4(), "应为 IPv4");
+    }
+
+    #[test]
+    fn is_local_ip_recognizes_own_interfaces() {
+        // 自识别兜底：回环与本机的**任一**网卡地址都必须判为「本机」。
+        // 回归：切换网络时若只拿 `local_ipv4()` 的出口 IP 比对，探测滞后（返回旧 IP
+        // 或 None）会漏判，把自身广播当成对端 -> 触发 device_id 碰撞重生 -> 旧 id 又被
+        // 当成另一台设备 -> 本机连上自己（在线列表出现「自己带 IP」的条目）。
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(is_local_ip(loopback), "回环必须识别为本机");
+
+        let ifs = if_addrs::get_if_addrs().expect("应能枚举网卡");
+        let own: Vec<IpAddr> = ifs
+            .iter()
+            .filter(|i| !i.is_loopback() && i.ip().is_ipv4())
+            .map(|i| i.ip())
+            .collect();
+        assert!(!own.is_empty(), "本机应至少有 1 个非回环 IPv4 地址");
+        for ip in own {
+            assert!(is_local_ip(ip), "本机地址 {ip} 应识别为本机");
+        }
+
+        // 反例：RFC 5737 保留测试段（TEST-NET-3）不应属于本机网卡。
+        // 先确认它确实不是本机地址，避免特殊环境导致测试误失败。
+        let foreign: IpAddr = "203.0.113.7".parse().unwrap();
+        if !ifs.iter().any(|i| i.ip() == foreign) {
+            assert!(!is_local_ip(foreign), "非本机地址不得识别为本机");
+        }
     }
 
     #[test]
