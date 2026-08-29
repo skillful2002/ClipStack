@@ -8,8 +8,8 @@ import type { ContentType, HistoryItem } from "../types";
 import * as api from "../lib/tauri";
 import type { UpdateCheck } from "../lib/tauri";
 
-/** 侧边栏分类：全部 + 五种内容类型。 */
-export type Category = ContentType | "all";
+/** 侧边栏分类：全部 + 五种内容类型 + 收藏。 */
+export type Category = ContentType | "all" | "favorites";
 /** 主列表时间筛选。 */
 export type TimeFilter = "all" | "today" | "yesterday" | "week" | "month" | "date";
 /** 主区域视图。 */
@@ -241,7 +241,9 @@ export function filterItems(
   }
 
   return items.filter((it) => {
-    if (category !== "all" && it.contentType !== category) return false;
+    if (category !== "all" && category !== "favorites" && it.contentType !== category)
+      return false;
+    if (category === "favorites" && !it.isFavorite) return false;
 
     if (timeFilter !== "all") {
       const t = it.createdAt;
