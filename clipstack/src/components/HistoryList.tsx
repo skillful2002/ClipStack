@@ -7,7 +7,7 @@ import { dayLabel } from "../lib/format";
 import { useT } from "../lib/i18n";
 import type { HistoryItem } from "../types";
 import { HistoryItemRow } from "./HistoryItemRow";
-import { TrashBinIcon } from "./icons";
+import { TrashBinIcon, PinIcon } from "./icons";
 
 const TIME_TABS: { key: TimeFilter; labelKey: string }[] = [
   { key: "all", labelKey: "timefilter.all" },
@@ -57,17 +57,22 @@ export function HistoryList() {
     listBodyRef.current?.scrollTo({ top: 0 });
   }, [category, timeFilter, search, sourceFilter, filterDate]);
 
-  // 按日分组（保持置顶优先、时间倒序的既有顺序）。
+  // 置顶条目单独成区：列表里若与普通条目混排，取消置顶后（尤其它本身又是最新一条时）
+  // 位置几乎不变，用户无法从位置上判断置顶是否已经取消。
+  const pinnedItems = useMemo(() => filtered.filter((it) => it.isPinned), [filtered]);
+  const restItems = useMemo(() => filtered.filter((it) => !it.isPinned), [filtered]);
+
+  // 按日分组（非置顶部分，保持时间倒序的既有顺序）。
   const groups = useMemo(() => {
     const out: { label: string; items: HistoryItem[] }[] = [];
-    for (const it of filtered) {
+    for (const it of restItems) {
       const label = dayLabel(it.createdAt);
       const last = out[out.length - 1];
       if (last && last.label === label) last.items.push(it);
       else out.push({ label, items: [it] });
     }
     return out;
-  }, [filtered]);
+  }, [restItems]);
 
   return (
     <section className="list-pane">
@@ -119,25 +124,50 @@ export function HistoryList() {
             {search ? t("list.emptySearch") : t("list.emptyDefault")}
           </div>
         ) : (
-          groups.map((g) => (
-            <div key={g.label} className="list-group">
-              <div className="group-header">{g.label}</div>
-              {g.items.map((it) => (
-                <HistoryItemRow
-                  key={it.id}
-                  item={it}
-                  selected={it.id === selectedId}
-                  onSelect={select}
-                  onCopy={copy}
-                  onSave={save}
-                  onPin={pin}
-                  onFav={fav}
-                  onDelete={del}
-                  onOpen={open}
-                />
-              ))}
-            </div>
-          ))
+          <>
+            {pinnedItems.length > 0 && (
+              <div className="list-group pinned-group">
+                <div className="group-header pinned-header">
+                  <PinIcon size={12} active />
+                  {t("list.pinnedSection")}
+                  <span className="pinned-count">{pinnedItems.length}</span>
+                </div>
+                {pinnedItems.map((it) => (
+                  <HistoryItemRow
+                    key={it.id}
+                    item={it}
+                    selected={it.id === selectedId}
+                    onSelect={select}
+                    onCopy={copy}
+                    onSave={save}
+                    onPin={pin}
+                    onFav={fav}
+                    onDelete={del}
+                    onOpen={open}
+                  />
+                ))}
+              </div>
+            )}
+            {groups.map((g) => (
+              <div key={g.label} className="list-group">
+                <div className="group-header">{g.label}</div>
+                {g.items.map((it) => (
+                  <HistoryItemRow
+                    key={it.id}
+                    item={it}
+                    selected={it.id === selectedId}
+                    onSelect={select}
+                    onCopy={copy}
+                    onSave={save}
+                    onPin={pin}
+                    onFav={fav}
+                    onDelete={del}
+                    onOpen={open}
+                  />
+                ))}
+              </div>
+            ))}
+          </>
         )}
       </div>
 

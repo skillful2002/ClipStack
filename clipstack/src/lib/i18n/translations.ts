@@ -33,6 +33,7 @@ const zhCN: Dict = {
   "list.clearAllTooltip": "清除全部记录",
   "list.clearAllButton": "清除全部",
   "list.itemsCount": "{n} 项",
+  "list.pinnedSection": "置顶",
   "list.emptySearch": "没有匹配的内容",
   "list.emptyDefault": "暂无剪贴板记录，复制点什么试试",
 
@@ -364,6 +365,7 @@ const zhTW: Dict = {
   "list.clearAllTooltip": "清除全部紀錄",
   "list.clearAllButton": "清除全部",
   "list.itemsCount": "{n} 項",
+  "list.pinnedSection": "置頂",
   "list.emptySearch": "沒有符合的內容",
   "list.emptyDefault": "暫無剪貼簿紀錄，複製點什麼試試",
 
@@ -695,6 +697,7 @@ const en: Dict = {
   "list.clearAllTooltip": "Clear all records",
   "list.clearAllButton": "Clear All",
   "list.itemsCount": "{n} items",
+  "list.pinnedSection": "Pinned",
   "list.emptySearch": "No matching content",
   "list.emptyDefault": "No clipboard history yet. Copy something to try.",
 
@@ -1026,6 +1029,7 @@ const ja: Dict = {
   "list.clearAllTooltip": "すべての記録を消去",
   "list.clearAllButton": "すべて消去",
   "list.itemsCount": "{n} 件",
+  "list.pinnedSection": "ピン留め",
   "list.emptySearch": "一致する内容がありません",
   "list.emptyDefault": "クリップボードの履歴はまだありません。何かをコピーしてみてください。",
 
@@ -1357,6 +1361,7 @@ const de: Dict = {
   "list.clearAllTooltip": "Alle Einträge löschen",
   "list.clearAllButton": "Alle löschen",
   "list.itemsCount": "{n} Einträge",
+  "list.pinnedSection": "Angepinnt",
   "list.emptySearch": "Keine passenden Inhalte",
   "list.emptyDefault": "Noch keine Zwischenablage-Historie. Kopieren Sie etwas zum Testen.",
 
@@ -1688,6 +1693,7 @@ const fr: Dict = {
   "list.clearAllTooltip": "Effacer tous les enregistrements",
   "list.clearAllButton": "Tout effacer",
   "list.itemsCount": "{n} éléments",
+  "list.pinnedSection": "Épinglé",
   "list.emptySearch": "Aucun contenu correspondant",
   "list.emptyDefault": "Aucun historique du presse-papiers pour l'instant. Copiez quelque chose pour essayer.",
 

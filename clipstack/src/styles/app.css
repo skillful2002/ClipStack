@@ -398,6 +398,26 @@
   padding: 8px 12px 4px;
 }
 
+/* 置顶分区：与普通条目视觉上分开，取消置顶后条目会立即落入下方日期分组。 */
+.pinned-group {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--cs-border);
+  margin-bottom: 8px;
+}
+
+.pinned-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cs-accent);
+}
+
+.pinned-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cs-text-tertiary);
+}
+
 .list-empty {
   padding: 48px 20px;
   text-align: center;
