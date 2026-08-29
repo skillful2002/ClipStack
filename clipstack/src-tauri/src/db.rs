@@ -366,6 +366,33 @@ pub fn insert_remote_clip(conn: &Connection, input: RemoteClipInput<'_>) -> rusq
     {
         return Ok(None); // 已存在，跳过（去重）
     }
+    // 内容去重（关键）：对端重复复制同一内容时会携带新的 sync_id，仅按 sync_id 去重会产生
+    // 多条内容完全相同的行。故先按 hash 查重——已存在则直接跳过，既不新增行、也不改动
+    // 该行的时间 / 置顶 / 收藏状态（否则「取消置顶」会被对端重复共享悄悄改回置顶）。
+    if conn
+        .query_row(
+            "SELECT id FROM history WHERE hash = ?",
+            [input.hash],
+            |r| r.get::<_, i64>(0),
+        )
+        .is_ok()
+    {
+        return Ok(None);
+    }
+    // 跨 hash 的「内容级」去重：详见 `find_duplicate_row_by_content` 注释。
+    // 对端可能是另一个版本构建，同一段文本算出的 hash 与本机不同，仅按 hash 会漏判，
+    // 于是同一条内容被存成多行（取消置顶只作用在其中一行）。
+    if find_duplicate_row_by_content(
+        conn,
+        input.key,
+        input.content_type,
+        input.content_text,
+        input.size_bytes,
+    )?
+    .is_some()
+    {
+        return Ok(None);
+    }
     let sealed_text = seal_text(input.key, input.content_text);
     let sealed_blob = seal_blob(input.key, input.content_blob);
     conn.execute(
