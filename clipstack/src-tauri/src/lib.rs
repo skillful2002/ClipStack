@@ -142,6 +142,9 @@ pub fn run() {
                         let conn = db_state.conn.lock().expect("db lock poisoned");
                         if let Some(k) = kg.as_ref() {
                             let _ = db::migrate_plaintext_to_encrypted(&conn, k);
+                            // 合并历史遗留的「同内容多行」（局域网共享 / hash 版本差异造成），
+                            // 使置顶与取消置顶始终只对应唯一一行。
+                            let _ = db::dedupe_history_by_content(&conn, Some(k));
                         }
                     }
                     Err(e) => {

@@ -207,7 +207,45 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // 回收站同样返回 HistoryItem（含来源标识），故 trash 也补这两列（共享条目一般不进回收站，恒为本地）。
     add_column_if_missing(conn, "trash", "origin_device", "TEXT NOT NULL DEFAULT ''")?;
     add_column_if_missing(conn, "trash", "is_remote", "INTEGER NOT NULL DEFAULT 0")?;
+    // 一次性合并历史重复行：旧版本共享条目仅按 sync_id 去重，会产生多条内容相同的行，
+    // 表现为「取消置顶无效 / 列表出现多个相同条目」（详见 dedupe_history_by_hash 注释）。
+    let _ = dedupe_history_by_hash(conn);
     Ok(())
+}
+
+/// 合并 history 中内容完全相同的重复行：同一 hash 仅保留「最优」一行，其余删除。
+///
+/// 背景：早期版本 `insert_remote_clip` 仅按 `sync_id` 去重，而对端每次复制同一内容都会
+/// 生成新的 sync_id，于是同一条内容被反复插入多行。用户对其中的一行取消置顶时，
+/// 另一行仍为置顶，界面上就会出现「同一条内容既在置顶区、又在原位」以及「点了取消
+/// 又回到顶部」（实际点到了相邻的同内容行，把它置顶了）的错觉。
+///
+/// 保留优先级：置顶 > 收藏 > 创建时间最新 > id 最大；删除其余行（secure_delete 已开启）。
+pub fn dedupe_history_by_hash(conn: &Connection) -> rusqlite::Result<usize> {
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT h.id FROM history h
+             WHERE EXISTS (
+                 SELECT 1 FROM history o WHERE o.hash = h.hash AND (
+                        o.is_pinned   > h.is_pinned
+                     OR (o.is_pinned   = h.is_pinned   AND o.is_favorite > h.is_favorite)
+                     OR (o.is_pinned   = h.is_pinned   AND o.is_favorite = h.is_favorite AND o.created_at > h.created_at)
+                     OR (o.is_pinned   = h.is_pinned   AND o.is_favorite = h.is_favorite AND o.created_at = h.created_at AND o.id > h.id)
+                 )
+             )",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        v
+    };
+    let mut removed = 0usize;
+    for id in ids {
+        removed += conn.execute("DELETE FROM history WHERE id = ?", [id])?;
+    }
+    Ok(removed)
 }
 
 /// L3 · 局域网共享：新建 `sync_profiles` 表与 `history` 增量列（幂等）。
