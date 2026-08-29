@@ -577,6 +577,31 @@ pub fn insert_or_bump(
         return Ok(existing);
     }
 
+    // 跨 hash 的「内容级」去重：同一段文本可能已由对端共享（hash 不同）入库，
+    // 此时应复用那一行而不是再插一条（详见 `find_duplicate_row_by_content` 注释）。
+    if let Ok(Some(existing)) = find_duplicate_row_by_content(
+        conn,
+        key,
+        item.content_type.as_str(),
+        &item.content_text,
+        item.size_bytes,
+    ) {
+        conn.execute(
+            "UPDATE history SET created_at = ?, content_text = ?, content_blob = ?, size_bytes = ?, source_app = ?, hash = ? WHERE id = ?",
+            params![
+                item.created_at,
+                ct,
+                cb,
+                item.size_bytes,
+                item.source_app,
+                item.hash,
+                existing
+            ],
+        )?;
+        let _ = enforce_capacity(conn, MAX_HISTORY);
+        return Ok(existing);
+    }
+
     conn.execute(
         "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, is_sensitive, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
@@ -779,9 +804,29 @@ pub fn get_trash(conn: &Connection, key: Option<&Key>) -> rusqlite::Result<Vec<H
 
 /// 恢复：从 trash 移回 history（重置置顶/收藏，created_at 取当前时间以置顶最新）。
 /// 不保留原 id，由 history 自增分配，避免与现有行冲突。
+///
+/// 内容去重：若 history 中已有同 hash 的行，则不再插入第二条，仅把已有行的时间提到最新
+/// （保留其置顶 / 收藏状态），避免恢复操作制造内容重复的条目。
 pub fn restore_item(conn: &mut Connection, id: i64) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     let now = now_ms();
+    let hash: Option<String> = tx
+        .query_row("SELECT hash FROM trash WHERE id = ?", [id], |r| r.get(0))
+        .ok();
+    if let Some(h) = hash {
+        if let Ok(existing) = tx.query_row(
+            "SELECT id FROM history WHERE hash = ?",
+            [h.as_str()],
+            |r| r.get::<_, i64>(0),
+        ) {
+            tx.execute(
+                "UPDATE history SET created_at = ? WHERE id = ?",
+                params![now, existing],
+            )?;
+            tx.execute("DELETE FROM trash WHERE id = ?", [id])?;
+            return tx.commit();
+        }
+    }
     tx.execute(
         "INSERT INTO history (content_type, content_text, content_blob, source_app, size_bytes, hash, is_pinned, is_favorite, created_at, is_sensitive) \
          SELECT content_type, content_text, content_blob, source_app, size_bytes, hash, 0, 0, ?, is_sensitive \
