@@ -149,14 +149,20 @@ pub fn delete_items(
 /// 切换置顶，返回切换后状态。
 #[tauri::command]
 pub fn toggle_pin(
+    app: AppHandle,
     db: State<'_, DbState>,
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<bool, String> {
     ensure_unlocked(&state)?;
     state.touch_activity();
-    let conn = db.lock();
-    db::toggle_pin(&conn, id).map_err(|e| e.to_string())
+    // 先释放数据库锁，再通知托盘刷新；监听器会再次读取数据库。
+    let value = {
+        let conn = db.lock();
+        db::toggle_pin(&conn, id).map_err(|e| e.to_string())?
+    };
+    let _ = app.emit("refresh-tray", ());
+    Ok(value)
 }
 
 /// 切换收藏，返回切换后状态。
