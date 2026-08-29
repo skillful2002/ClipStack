@@ -1571,8 +1571,9 @@ mod tests {
         let c = mem_db();
         let id = insert_or_bump(&c, None, &sample("a", 100)).unwrap();
         assert!(toggle_pin(&c, id).unwrap());
+        assert!(!toggle_pin(&c, id).unwrap());
         let items = get_history(&c, None, 100, true).unwrap();
-        assert!(items[0].is_pinned);
+        assert!(!items[0].is_pinned);
     }
 
     #[test]
@@ -1885,6 +1886,191 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 2, "去重后仅 2 行");
+    }
+
+    /// 对端重复复制同一内容：sync_id 每次不同，但 hash 相同 —— 不得再插入第二条。
+    #[test]
+    fn remote_clip_dedups_by_hash_when_sync_id_differs() {
+        let c = mem_db_lan();
+        insert_remote_clip(&c, remote_input("same", "h1", "sync-1", "peer-A", 3, "p1")).unwrap();
+        // 同 hash、不同 sync_id：应跳过插入（避免列表出现多条相同内容）。
+        let second =
+            insert_remote_clip(&c, remote_input("same", "h1", "sync-2", "peer-A", 4, "p1")).unwrap();
+        assert!(second.is_none(), "同内容不同 sync_id 也应去重");
+        let count: i64 = c
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "同内容只保留一行");
+    }
+
+    /// 已存在的行若被用户置顶 / 收藏，重复共享不得新增行，也不得改回未置顶。
+    #[test]
+    fn remote_clip_keeps_pinned_state_on_duplicate() {
+        let c = mem_db_lan();
+        let id = insert_remote_clip(&c, remote_input("same", "h1", "sync-1", "peer-A", 3, "p1"))
+            .unwrap()
+            .unwrap();
+        c.execute("UPDATE history SET is_pinned = 1 WHERE id = ?", [id])
+            .unwrap();
+        assert!(insert_remote_clip(&c, remote_input("same", "h1", "sync-9", "peer-A", 9, "p1"))
+            .unwrap()
+            .is_none());
+        let pinned: i64 = c
+            .query_row("SELECT is_pinned FROM history WHERE id = ?", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pinned, 1, "重复共享不得取消原行的置顶");
+    }
+
+    /// 跨版本 hash 不一致（对端 / 旧版本构建）时，同内容不得再插入第二行。
+    #[test]
+    fn insert_or_bump_dedups_by_content_across_hashes() {
+        let c = mem_db();
+        let text = "hello 世界";
+        let base = NewItem {
+            content_type: crate::models::ContentType::Text,
+            content_text: text.to_string(),
+            content_blob: None,
+            source_app: "App".into(),
+            size_bytes: text.len() as i64,
+            hash: "hash-from-peer".into(),
+            created_at: 100,
+            is_sensitive: false,
+        };
+        let id1 = insert_or_bump(&c, None, &base).unwrap();
+        // 本机算出的 hash 不同（模拟 DefaultHasher 跨构建不一致），但内容完全相同。
+        let mut local = base.clone();
+        local.hash = "hash-local".into();
+        local.created_at = 200;
+        let id2 = insert_or_bump(&c, None, &local).unwrap();
+        assert_eq!(id1, id2, "同内容应复用同一行，不得新增重复条目");
+        let count: i64 = c
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        let items = get_history(&c, None, 100, true).unwrap();
+        assert_eq!(items[0].created_at, 200, "复用行应刷新时间");
+    }
+
+    /// 同一段内容带不同缩进 / 换行反复复制 → 视为同一条，只保留一行（列表预览无法区分）。
+    #[test]
+    fn insert_or_bump_dedups_whitespace_variants() {
+        let c = mem_db();
+        let first = "select 1";
+        let variant = "\n  select 1\n";
+        let mut a = sample("h1", 100);
+        a.content_text = first.to_string();
+        a.size_bytes = first.len() as i64;
+        let id1 = insert_or_bump(&c, None, &a).unwrap();
+        let mut b = sample("h2", 200);
+        b.content_text = variant.to_string();
+        b.size_bytes = variant.len() as i64;
+        let id2 = insert_or_bump(&c, None, &b).unwrap();
+        assert_eq!(id1, id2, "仅首尾空白不同的内容应视为同一条");
+        assert_eq!(get_history(&c, None, 100, true).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dedupe_history_by_content_merges_whitespace_variants() {
+        let c = mem_db();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) \
+             VALUES ('text','select 1','App',8,'h-a',100)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned) \
+             VALUES ('text','\n  select 1\n','App',12,'h-b',200,1)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(dedupe_history_by_content(&c, None).unwrap(), 1);
+        let items = get_history(&c, None, 100, true).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].is_pinned, "保留置顶那一行");
+    }
+
+    #[test]
+    fn dedupe_history_by_content_merges_rows_with_different_hashes() {
+        let c = mem_db();
+        // 绕过 insert_or_bump 的内容去重，直接造出「同内容、不同 hash」的两行历史脏数据。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) \
+             VALUES ('text','dup','App',3,'h-a',100)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned) \
+             VALUES ('text','dup','App',3,'h-b',200,1)",
+            [],
+        )
+        .unwrap();
+        let removed = dedupe_history_by_content(&c, None).unwrap();
+        assert_eq!(removed, 1, "应删除 1 条重复行");
+        let items = get_history(&c, None, 100, true).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].is_pinned, "保留置顶那一行");
+        assert_eq!(items[0].created_at, 200);
+    }
+
+    #[test]
+    fn dedupe_history_by_hash_merges_duplicates() {
+        let c = mem_db();
+        // 三行同 hash：一行置顶（最新）、两行普通；合并后只保留置顶那行。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned) VALUES ('text','a','App',1,'h1',100,0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned) VALUES ('text','a','App',1,'h1',200,0)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at, is_pinned) VALUES ('text','a','App',1,'h1',300,1)",
+            [],
+        )
+        .unwrap();
+        // 另一 hash 的普通行不受影响。
+        c.execute(
+            "INSERT INTO history (content_type, content_text, source_app, size_bytes, hash, created_at) VALUES ('text','b','App',1,'h2',400)",
+            [],
+        )
+        .unwrap();
+        let removed = dedupe_history_by_hash(&c).unwrap();
+        assert_eq!(removed, 2);
+        let items = get_history(&c, None, 100, true).unwrap();
+        assert_eq!(items.len(), 2, "同内容合并后仅剩 2 行");
+        assert!(items[0].is_pinned, "保留置顶那一行");
+        assert_eq!(items[0].created_at, 300);
+    }
+
+    /// 本机已捕获过同一段文本（hash 不同）时，对端再共享一次不得新增行。
+    #[test]
+    fn remote_clip_dedups_by_content_across_hashes() {
+        let c = mem_db_lan();
+        let text = "shared text";
+        let mut local = sample("local-hash", 100);
+        local.content_text = text.to_string();
+        local.size_bytes = text.len() as i64;
+        let local_id = insert_or_bump(&c, None, &local).unwrap();
+        // 对端用不同 hash 共享同样内容。
+        let mut input = remote_input(text, "peer-hash", "sync-1", "peer-A", 2, "p1");
+        input.size_bytes = text.len() as i64;
+        assert!(
+            insert_remote_clip(&c, input).unwrap().is_none(),
+            "同内容应去重，不新增行"
+        );
+        let count: i64 = c
+            .query_row("SELECT COUNT(*) FROM history WHERE id = ?", [local_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        let total: i64 = c
+            .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, 1, "全表仅 1 行");
     }
 
     #[test]
