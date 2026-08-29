@@ -18,6 +18,7 @@ import {
   HomeIcon,
   SourceIcon,
   ClearIcon,
+  StarIcon,
 } from "./icons";
 
 const CATEGORIES: { key: Category; type?: ContentType }[] = [
@@ -27,6 +28,7 @@ const CATEGORIES: { key: Category; type?: ContentType }[] = [
   { key: "code", type: "code" },
   { key: "image", type: "image" },
   { key: "file", type: "file" },
+  { key: "favorites" },
 ];
 
 export function Sidebar() {
@@ -46,14 +48,20 @@ export function Sidebar() {
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
     for (const it of items) c[it.contentType] = (c[it.contentType] ?? 0) + 1;
+    c.favorites = items.filter((i) => i.isFavorite).length;
     return c;
   }, [items]);
 
-  // 最常见的 12 个来源：数量降序；数量相同按最后剪切时间（createdAt）倒序。
-  // 按当前所选分类（类型）限定用于统计来源的数据范围：
-  // 「全部」用全量 items，否则只用该 content type 的条目。
+  // 最常见的 10 个来源：数量降序；数量相同按最后剪切时间（createdAt）倒序。
+  // 按当前所选分类（类型 / 收藏）限定用于统计来源的数据范围：
+  // 「全部」用全量 items，否则只用该分类（或收藏）的条目。
   const scopedItems = useMemo(
-    () => (category === "all" ? items : items.filter((i) => i.contentType === category)),
+    () =>
+      category === "all"
+        ? items
+        : category === "favorites"
+          ? items.filter((i) => i.isFavorite)
+          : items.filter((i) => i.contentType === category),
     [items, category],
   );
 
@@ -69,7 +77,7 @@ export function Sidebar() {
     }
     return [...map.entries()]
       .sort((a, b) => b[1].count - a[1].count || b[1].last - a[1].last)
-      .slice(0, 12)
+      .slice(0, 10)
       .map(([key]) => key);
   }, [scopedItems]);
 
@@ -81,7 +89,11 @@ export function Sidebar() {
   }, [scopedItems]);
 
   const categoryLabel = (cat: (typeof CATEGORIES)[number]): string =>
-    cat.key === "all" ? t("sidebar.all") : t(`type.${cat.type}`);
+    cat.key === "all"
+      ? t("sidebar.all")
+      : cat.key === "favorites"
+        ? t("sidebar.favorites")
+        : t(`type.${cat.type}`);
 
   // 来源项的显示文案：空串（未知来源）回落到对应文案。
   const sourceLabel = (key: string): string =>
@@ -129,7 +141,13 @@ export function Sidebar() {
             }}
           >
             <span className="nav-icon" style={{ color: cat.type ? TYPE_META[cat.type].color : "var(--cs-text-secondary)" }}>
-              {cat.type ? <TypeIcon type={cat.type} size={16} /> : <AllIcon size={16} />}
+              {cat.type ? (
+                <TypeIcon type={cat.type} size={16} />
+              ) : cat.key === "favorites" ? (
+                <StarIcon size={16} />
+              ) : (
+                <AllIcon size={16} />
+              )}
             </span>
             <span className="nav-label">{categoryLabel(cat)}</span>
             <span className="nav-shortcut">{NAV_SHORTCUTS[cat.key]}</span>
