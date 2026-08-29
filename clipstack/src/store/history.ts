@@ -55,7 +55,7 @@ interface HistoryState {
   setSourceFilter: (s: string | null) => void;
   setFilterDate: (d: string | null) => void;
   setView: (v: View) => void;
-  /** 实时事件：新条目到达（同 id 替换，否则前置）。 */
+  /** 实时事件：新条目到达（同 id 更新内容但保留用户元数据，否则前置）。 */
   prepend: (item: HistoryItem) => void;
   /** 删除：从列表移除并修正选中项。 */
   remove: (id: number) => void;
@@ -169,7 +169,16 @@ export const useHistory = create<HistoryState>((set, get) => ({
   prepend: (item) => {
     const exists = get().items.some((i) => i.id === item.id);
     const items = exists
-      ? get().items.map((i) => (i.id === item.id ? item : i))
+      ? get().items.map((current) =>
+          current.id === item.id
+            ? {
+                ...item,
+                // clipboard-changed 可能晚于置顶/收藏命令到达，避免旧快照覆盖用户操作。
+                isPinned: current.isPinned,
+                isFavorite: current.isFavorite,
+              }
+            : current,
+        )
       : [item, ...get().items];
     set({ items: sortItems(items), selectedId: get().selectedId ?? item.id });
   },
