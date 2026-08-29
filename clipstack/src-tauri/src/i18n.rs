@@ -182,6 +182,18 @@ pub fn tray_empty(lang: Lang) -> &'static str {
     }
 }
 
+/// 托盘菜单「置顶」分组标题（不可点击，仅作分隔标识）。
+pub fn tray_pinned(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhCn => "── 置顶 ──",
+        Lang::ZhTw => "── 置頂 ──",
+        Lang::En => "── Pinned ──",
+        Lang::Ja => "── ピン留め ──",
+        Lang::De => "── Angepinnt ──",
+        Lang::Fr => "── Épinglé ──",
+    }
+}
+
 /// 顶部原生菜单栏（macOS 菜单栏 App / Edit / Window / Help）的全部文案，跟随 `lang`。
 ///
 /// 背景：Tauri 在 macOS 上用 `muda` 自动生成顶部菜单，但 `muda` 把预定义项

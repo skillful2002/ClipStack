@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use crate::clipboard::MonitorState;
 use crate::db::{self, DbState};
 use crate::AppState;
-use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_quit, tray_settings, tray_share, tray_share_off, tray_share_on, Lang, MenuLang};
+use crate::i18n::{tray_about, tray_empty, tray_help, tray_lock, tray_locked, tray_open_main, tray_pinned, tray_quit, tray_settings, tray_share, tray_share_off, tray_share_on, Lang, MenuLang};
 use crate::lan::LanManager;
 use crate::models::ContentType;
 use crate::set_dock_visible;
@@ -112,7 +112,28 @@ fn build_menu(
         let empty = MenuItem::with_id(app, "empty", tray_empty(lang), false, None::<&str>)?;
         menu.append(&empty)?;
     } else {
+        // 置顶条目排在最前（`get_recent_tray` 已按 is_pinned DESC 排序）：
+        // ① 遇到第一条置顶条目时，在其上方插入不可点击的「置顶」标题；
+        // ② 置顶区结束（第一条非置顶条目）时补一条分隔线。
+        // 关键：标题必须以「确实出现过置顶条目」为前提 —— 否则一条置顶都没有时，
+        // 标题会被插到第二条之前，看上去就像最新那条被置顶了。
+        let mut marker_done = false;
+        let mut sep_done = false;
         for (idx, it) in recent.iter().enumerate() {
+            if it.is_pinned && !marker_done {
+                menu.append(&MenuItem::with_id(
+                    app,
+                    "pinned_marker",
+                    tray_pinned(lang),
+                    false,
+                    None::<&str>,
+                )?)?;
+                marker_done = true;
+            }
+            if !it.is_pinned && marker_done && !sep_done {
+                menu.append(&PredefinedMenuItem::separator(app)?)?;
+                sep_done = true;
+            }
             let label = truncate(&it.preview, 40);
             let id = format!("copy:{}", it.id);
             let icon = type_tray_icon(it.content_type)?;
@@ -124,6 +145,10 @@ fn build_menu(
             }
             let item = builder.build(app)?;
             menu.append(&item)?;
+        }
+        // 全部都是置顶条目时，循环内不会遇到非置顶项，这里补一条收尾分隔线。
+        if marker_done && !sep_done {
+            menu.append(&PredefinedMenuItem::separator(app)?)?;
         }
     }
 
