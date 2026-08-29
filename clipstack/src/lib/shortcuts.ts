@@ -22,6 +22,7 @@ export const NAV_SHORTCUTS: Record<string, string> = {
   code: MOD + "4",
   image: MOD + "5",
   file: MOD + "6",
+  favorites: MOD + "7",
   settings: MOD + ",",
   trash: MOD + SHIFT + "T",
   search: MOD + "/",

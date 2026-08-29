@@ -199,11 +199,11 @@ export default function App() {
 
       // 修饰键组合：输入框中也允许，便于随时切换分类 / 视图。
       if (e.metaKey || e.ctrlKey) {
-        if (k >= "1" && k <= "6") {
+        if (k >= "1" && k <= "7") {
           e.preventDefault();
           const map: Record<string, Category> = {
             "1": "all", "2": "text", "3": "link",
-            "4": "code", "5": "image", "6": "file",
+            "4": "code", "5": "image", "6": "file", "7": "favorites",
           };
           const st = useHistory.getState();
           st.setCategory(map[k]);
