@@ -419,6 +419,135 @@ pub fn insert_remote_clip(conn: &Connection, input: RemoteClipInput<'_>) -> rusq
     Ok(Some(conn.last_insert_rowid()))
 }
 
+/// 去重用的内容归一化：统一换行符 + 去掉首尾空白。
+///
+/// 目的：同一段内容在不同来源下会带上不同的首尾空白（代码缩进、跨设备 CRLF/LF），
+/// 列表预览又只显示截断后的文本，用户看到的就是「一模一样的多条」。归一化后比对，
+/// 这类内容视为同一条，避免它们各占一行导致「取消置顶只生效在其中一条」。
+/// 仅影响「是否判重」，不改动入库内容。
+fn normalize_for_dedup(s: &str) -> String {
+    s.replace("\r\n", "\n").trim().to_string()
+}
+
+/// 慢路径扫描窗口：仅在字节数不同（首尾空白 / 换行差异）时，回溯最近若干条同类条目，
+/// 以免每次捕获都全表解密。
+const DEDUP_SCAN_LIMIT: i64 = 300;
+
+/// 按「解密后的真实内容」查找重复行（跨 hash 去重）。
+///
+/// 背景：`hash` 由 `std::collections::hash_map::DefaultHasher` 计算，而 Rust 不保证
+/// `DefaultHasher` 在不同版本 / 不同构建之间一致。对端设备（可能是另一个版本构建）对
+/// 同一段文本会算出不同的 hash，于是「本机捕获的行」与「对端共享来的同一内容行」hash 不同，
+/// 仅按 hash 去重会漏判，history 中就会出现多条内容相同的行 —— 表现为取消置顶只作用
+/// 在其中一行、列表里同时存在多个相同条目（点掉一个，另一个又顶上来）。
+///
+/// 实现：先按「同类型 + 同字节数」快路径比对明文；未命中再回溯最近 `DEDUP_SCAN_LIMIT`
+/// 条同类条目，用归一化后的文本比对（覆盖首尾空白 / 换行差异）。
+/// 仅处理文本类（text / link / code）；图片 / 文件的 `content_text` 只是占位符
+/// （如 "1920×1080 图片"、路径拼接），改由 hash 比对。
+pub fn find_duplicate_row_by_content(
+    conn: &Connection,
+    key: Option<&Key>,
+    content_type: &str,
+    content_text: &str,
+    size_bytes: i64,
+) -> rusqlite::Result<Option<i64>> {
+    if !matches!(content_type, "text" | "link" | "code") {
+        return Ok(None);
+    }
+    let target = normalize_for_dedup(content_text);
+    if target.is_empty() {
+        return Ok(None);
+    }
+
+    // 快路径：字节数相同（同一段内容的再次复制）。
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, content_text FROM history WHERE content_type = ?1 AND size_bytes = ?2",
+        )?;
+        let mut rows = stmt.query(params![content_type, size_bytes])?;
+        while let Some(r) = rows.next()? {
+            let id: i64 = r.get(0)?;
+            let stored: String = r.get(1)?;
+            if normalize_for_dedup(&open_text(key, &stored)) == target {
+                return Ok(Some(id));
+            }
+        }
+    }
+
+    // 慢路径：字节数不同（首尾空白 / 换行差异），回溯最近若干条同类条目。
+    let mut stmt = conn.prepare(
+        "SELECT id, content_text FROM history
+         WHERE content_type = ?1 AND size_bytes != ?2
+         ORDER BY created_at DESC LIMIT ?3",
+    )?;
+    let mut rows = stmt.query(params![content_type, size_bytes, DEDUP_SCAN_LIMIT])?;
+    while let Some(r) = rows.next()? {
+        let id: i64 = r.get(0)?;
+        let stored: String = r.get(1)?;
+        if normalize_for_dedup(&open_text(key, &stored)) == target {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// 合并 history 中「内容相同」的重复行（跨 hash、忽略首尾空白 / 换行差异）：
+/// 同一内容仅保留最优一行（置顶 > 收藏 > 时间最新 > id 最大），其余删除。
+///
+/// 用于启动时清理历史遗留的重复行（局域网共享回环、跨版本 hash 不一致、同一段代码
+/// 带不同缩进反复复制），使「取消置顶」只对应唯一一行，不会再出现「取消后仍有同内容
+/// 条目在顶部」「点一次取消又多出一条」的现象。
+/// 仅处理文本类；图片 / 文件由 `dedupe_history_by_hash` 负责。
+pub fn dedupe_history_by_content(
+    conn: &Connection,
+    key: Option<&Key>,
+) -> rusqlite::Result<usize> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content_text, is_pinned, is_favorite, created_at
+         FROM history WHERE content_type IN ('text','link','code')",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, i64>(4)?,
+        ))
+    })?;
+    // 正文 -> 当前保留行（置顶, 收藏, 时间, id）
+    let mut best: std::collections::HashMap<String, (i64, i64, i64, i64)> =
+        std::collections::HashMap::new();
+    let mut stale: Vec<i64> = Vec::new();
+    for row in rows {
+        let (id, sealed, pinned, fav, created) = row?;
+        let text = normalize_for_dedup(&open_text(key, &sealed));
+        if text.is_empty() {
+            continue; // 空内容不参与合并（避免误删独立空条目）
+        }
+        let score = (pinned, fav, created, id);
+        match best.get_mut(&text) {
+            Some(cur) => {
+                if score > *cur {
+                    stale.push(cur.3);
+                    *cur = score;
+                } else {
+                    stale.push(id);
+                }
+            }
+            None => {
+                best.insert(text, score);
+            }
+        }
+    }
+    let mut removed = 0usize;
+    for id in stale {
+        removed += conn.execute("DELETE FROM history WHERE id = ?", [id])?;
+    }
+    Ok(removed)
+}
+
 /// 新增或去重置顶：同 hash 已在 history 中 → 更新 created_at 等并置顶返回原 id；
 /// 否则插入新行。插入后执行容量上限清理。返回行 id。
 pub fn insert_or_bump(
