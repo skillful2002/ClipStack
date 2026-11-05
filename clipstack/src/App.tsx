@@ -7,6 +7,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useHistory, type Category } from "./store/history";
 import {
   onClipboardChanged,
+  onHistoryChanged,
   onShowView,
   onTrayCopied,
   getSettings,
@@ -38,6 +39,7 @@ import "./styles/app.css";
 
 export default function App() {
   const load = useHistory((s) => s.load);
+  const reload = useHistory((s) => s.reload);
   const prepend = useHistory((s) => s.prepend);
   const view = useHistory((s) => s.view);
   const loadTrash = useHistory((s) => s.loadTrash);
@@ -103,12 +105,19 @@ export default function App() {
       }
     })();
     const unlisten = onClipboardChanged((item) => prepend(item));
+    // 后端按「历史上限」清理记录后（保存设置即触发，或每 10 分钟的后台维护）重载列表，
+    // 避免界面上残留已被硬删的条目、点击后报错。
+    const historyUnlisten = onHistoryChanged(() => {
+      void reload();
+      void loadTrash();
+    });
     return () => {
       void unlisten.then((fn) => fn());
+      void historyUnlisten.then((fn) => fn());
       void lockUnlistenRef.current();
       themeUnlistenRef.current();
     };
-  }, [load, prepend]);
+  }, [load, reload, prepend, loadTrash]);
 
   // 日常开发：后台静默检查 Gitee 是否有新版本，结果写入 store 供侧边栏角标与关于页使用。
   // 网络异常 / 限流时静默忽略，绝不影响主流程。

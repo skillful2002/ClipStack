@@ -45,10 +45,29 @@ fn mask_sensitive_read(
     (plain, preview, detected)
 }
 
-/// 历史条目容量上限：超出后自动硬删最旧部分（不进回收站，避免回收站无限增长）。
-pub const MAX_HISTORY: i64 = 5000;
+/// 历史上限设置键：超出后自动硬删最旧的「未置顶」条目（不进回收站）。
+pub const MAX_HISTORY_KEY: &str = "max_history";
+/// 历史上限缺省值（与前端 `useHistory` 的默认拉取条数一致）。
+pub const DEFAULT_MAX_HISTORY: i64 = 1000;
+/// 历史上限允许区间（与前端输入框 clamp 保持一致）。
+pub const MIN_MAX_HISTORY: i64 = 50;
+pub const MAX_MAX_HISTORY: i64 = 5000;
 /// `get_history` 默认读取上限。
 pub const DEFAULT_LIMIT: i64 = 500;
+
+/// 读取并归一化「历史上限」设置值。
+///
+/// 缺省 / 非法 / `<= 0` 一律回退 `DEFAULT_MAX_HISTORY`，其余夹到
+/// `[MIN_MAX_HISTORY, MAX_MAX_HISTORY]`。
+/// 注意不能直接用 `clamp` 处理 0：`0.clamp(50, 5000)` = 50，会把误写入的 0 变成
+/// 「保留 50 条」并触发一次不可恢复的批量删除。
+pub fn get_max_history(conn: &Connection) -> i64 {
+    let raw = get_int_setting(conn, MAX_HISTORY_KEY, DEFAULT_MAX_HISTORY);
+    if raw <= 0 {
+        return DEFAULT_MAX_HISTORY;
+    }
+    raw.clamp(MIN_MAX_HISTORY, MAX_MAX_HISTORY)
+}
 
 /// 受 Tauri 托管的数据库连接。
 pub struct AppDb {
@@ -453,7 +472,7 @@ pub fn insert_remote_clip(conn: &Connection, input: RemoteClipInput<'_>) -> rusq
             input.profile_id,
         ],
     )?;
-    let _ = enforce_capacity(conn, MAX_HISTORY);
+    let _ = enforce_capacity(conn, get_max_history(conn));
     Ok(Some(conn.last_insert_rowid()))
 }
 
@@ -611,7 +630,7 @@ pub fn insert_or_bump(
                 existing
             ],
         )?;
-        let _ = enforce_capacity(conn, MAX_HISTORY);
+        let _ = enforce_capacity(conn, get_max_history(conn));
         return Ok(existing);
     }
 
@@ -636,7 +655,7 @@ pub fn insert_or_bump(
                 existing
             ],
         )?;
-        let _ = enforce_capacity(conn, MAX_HISTORY);
+        let _ = enforce_capacity(conn, get_max_history(conn));
         return Ok(existing);
     }
 
@@ -655,7 +674,7 @@ pub fn insert_or_bump(
         ],
     )?;
     let id = conn.last_insert_rowid();
-    let _ = enforce_capacity(conn, MAX_HISTORY);
+    let _ = enforce_capacity(conn, get_max_history(conn));
     Ok(id)
 }
 
@@ -1122,17 +1141,25 @@ pub fn delete_ignored_app(conn: &Connection, name: &str) -> rusqlite::Result<()>
     Ok(())
 }
 
-/// 容量清理：超出上限时硬删最旧 excess 条（不进回收站）。
-pub fn enforce_capacity(conn: &Connection, max: i64) -> rusqlite::Result<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))?;
-    if count > max {
-        let excess = count - max;
-        conn.execute(
-            "DELETE FROM history WHERE id IN (SELECT id FROM history ORDER BY created_at ASC LIMIT ?)",
-            [excess],
-        )?;
+/// 容量清理：超出上限时硬删最旧的「未置顶」条目（不进回收站）。
+///
+/// 置顶条目免于容量淘汰（与留存过期 `is_pinned = 0` 的口径一致）：
+/// 优先按 created_at 升序删未置顶行，未置顶不足时允许总量超过 `max`
+/// （例如 10 条全置顶、上限 5 → 不删除）。
+/// 返回实际删除条数，供调用方决定是否需要通知前端刷新列表。
+pub fn enforce_capacity(conn: &Connection, max: i64) -> rusqlite::Result<usize> {
+    if max <= 0 {
+        return Ok(0);
     }
-    Ok(())
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))?;
+    if count <= max {
+        return Ok(0);
+    }
+    conn.execute(
+        "DELETE FROM history WHERE id IN \
+         (SELECT id FROM history WHERE is_pinned = 0 ORDER BY created_at ASC LIMIT ?)",
+        [count - max],
+    )
 }
 
 /// P1b · 清理超期数据（含 trash）：
@@ -1557,13 +1584,73 @@ mod tests {
     }
 
     #[test]
-    fn capacity_is_enforced() {
+    fn capacity_is_enforced_by_default() {
         let c = mem_db();
-        for i in 0..(MAX_HISTORY + 10) {
+        for i in 0..(DEFAULT_MAX_HISTORY + 10) {
             insert_or_bump(&c, None, &sample(&format!("h{i}"), i)).unwrap();
         }
         let count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
-        assert_eq!(count, MAX_HISTORY);
+        assert_eq!(count, DEFAULT_MAX_HISTORY);
+    }
+
+    #[test]
+    fn capacity_follows_setting() {
+        let c = mem_db();
+        update_setting(&c, MAX_HISTORY_KEY, "100").unwrap();
+        for i in 0..120 {
+            insert_or_bump(&c, None, &sample(&format!("s{i}"), i)).unwrap();
+        }
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 100);
+    }
+
+    #[test]
+    fn capacity_keeps_pinned() {
+        let c = mem_db();
+        // 60 条中置顶最旧 5 条，上限 50 → 只能删未置顶里最旧的 10 条。
+        let mut ids = Vec::new();
+        for i in 0..60 {
+            ids.push(insert_or_bump(&c, None, &sample(&format!("p{i}"), i)).unwrap());
+        }
+        for id in ids.iter().take(5) {
+            toggle_pin(&c, *id).unwrap();
+        }
+        update_setting(&c, MAX_HISTORY_KEY, "50").unwrap();
+        let deleted = enforce_capacity(&c, get_max_history(&c)).unwrap();
+        assert_eq!(deleted, 10);
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 50);
+        let pinned: i64 = c
+            .query_row("SELECT COUNT(*) FROM history WHERE is_pinned = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pinned, 5, "置顶条目不应被容量清理删除");
+    }
+
+    #[test]
+    fn capacity_allows_overflow_when_all_pinned() {
+        let c = mem_db();
+        for i in 0..10 {
+            let id = insert_or_bump(&c, None, &sample(&format!("a{i}"), i)).unwrap();
+            toggle_pin(&c, id).unwrap();
+        }
+        let deleted = enforce_capacity(&c, 5).unwrap();
+        assert_eq!(deleted, 0, "全置顶时无法清理，允许超限");
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn max_history_setting_is_normalized() {
+        let c = mem_db();
+        assert_eq!(get_max_history(&c), DEFAULT_MAX_HISTORY);
+        update_setting(&c, MAX_HISTORY_KEY, "not-a-number").unwrap();
+        assert_eq!(get_max_history(&c), DEFAULT_MAX_HISTORY);
+        update_setting(&c, MAX_HISTORY_KEY, "0").unwrap();
+        assert_eq!(get_max_history(&c), DEFAULT_MAX_HISTORY, "0 不能夹成 50");
+        update_setting(&c, MAX_HISTORY_KEY, "40000").unwrap();
+        assert_eq!(get_max_history(&c), MAX_MAX_HISTORY);
+        update_setting(&c, MAX_HISTORY_KEY, "5").unwrap();
+        assert_eq!(get_max_history(&c), MIN_MAX_HISTORY);
     }
 
     #[test]

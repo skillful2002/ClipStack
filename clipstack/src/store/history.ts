@@ -7,6 +7,7 @@ import { create } from "zustand";
 import type { ContentType, HistoryItem } from "../types";
 import * as api from "../lib/tauri";
 import type { UpdateCheck } from "../lib/tauri";
+import { DEFAULT_MAX_HISTORY, clampMaxHistory } from "../lib/limits";
 
 /** 侧边栏分类：全部 + 五种内容类型 + 收藏。 */
 export type Category = ContentType | "all" | "favorites";
@@ -91,12 +92,12 @@ export const useHistory = create<HistoryState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
-      // 读取历史上限设置（默认 1000），用于首次拉取条数。
-      let limit = 1000;
+      // 读取历史上限设置（缺省 1000），用于首次拉取条数；上限需与后端清理口径一致。
+      let limit = DEFAULT_MAX_HISTORY;
       try {
         const settings = await api.getSettings();
         const mh = Number(settings.find((s) => s.key === "max_history")?.value);
-        if (mh > 0) limit = mh;
+        if (mh > 0) limit = clampMaxHistory(mh);
       } catch {
         /* 设置读取失败时回退默认 */
       }
@@ -115,11 +116,11 @@ export const useHistory = create<HistoryState>((set, get) => ({
   reload: async () => {
     set({ loading: true, error: null });
     try {
-      let limit = 1000;
+      let limit = DEFAULT_MAX_HISTORY;
       try {
         const settings = await api.getSettings();
         const mh = Number(settings.find((s) => s.key === "max_history")?.value);
-        if (mh > 0) limit = mh;
+        if (mh > 0) limit = clampMaxHistory(mh);
       } catch {
         /* 设置读取失败时回退默认 */
       }

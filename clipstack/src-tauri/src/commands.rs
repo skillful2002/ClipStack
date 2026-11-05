@@ -179,7 +179,8 @@ pub fn toggle_favorite(
 }
 
 /// 写入 / 覆盖单个设置项。
-/// 若保存的键为托盘历史条数，则广播 `tray-settings-changed`，使托盘菜单立即按新值刷新。
+/// - `tray_history_count` / `mask_sensitive`：广播 `tray-settings-changed`，托盘菜单立即刷新；
+/// - `max_history`：立即按新上限清理一次超出部分，并广播 `history-changed` 供前端重载列表。
 #[tauri::command]
 pub fn update_setting(
     app: AppHandle,
@@ -192,9 +193,23 @@ pub fn update_setting(
     // 仅对影响托盘菜单内容的设置变更才重建托盘（避免每次写设置都重建）。
     // mask_sensitive 改变后，托盘最近历史需按新开关重新脱敏。
     let refresh_tray = key == "tray_history_count" || key == "mask_sensitive";
+    let is_max_history = key == db::MAX_HISTORY_KEY;
     {
         let conn = db.lock();
         db::update_setting(&conn, &key, &value).map_err(|e| e.to_string())?;
+    }
+    // 历史上限「保存即生效」：写入后立即按新值清理一次，不必等维护线程的 10 分钟周期。
+    // 上限值必须重新从库里读（原始 value 可能被归一化：0 / 非法值回退缺省值）。
+    if is_max_history {
+        let deleted = {
+            let conn = db.lock();
+            let max = db::get_max_history(&conn);
+            db::enforce_capacity(&conn, max).unwrap_or(0)
+        };
+        // 锁释放后再通知前端重载列表。
+        if deleted > 0 {
+            let _ = app.emit("history-changed", deleted);
+        }
     }
     if refresh_tray {
         let _ = app.emit("tray-settings-changed", ());

@@ -1,9 +1,19 @@
 // P3 · 设置视图（P6 增强）：主题、语言、历史上限、开机自启、忽略应用管理。
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../lib/tauri";
 import { applyTheme, type Theme } from "../lib/theme";
+import {
+  DEFAULT_MAX_HISTORY,
+  DEFAULT_TRAY_HISTORY,
+  MAX_MAX_HISTORY,
+  MIN_MAX_HISTORY,
+  MAX_TRAY_HISTORY,
+  MIN_TRAY_HISTORY,
+  clampMaxHistory,
+  clampTrayHistory,
+} from "../lib/limits";
 import { SecuritySettings } from "./SecuritySettings";
 import { SaveTypesSettings } from "./SaveTypesSettings";
 import { RetentionSettings } from "./RetentionSettings";
@@ -28,8 +38,12 @@ export function SettingsView() {
 
   const [theme, setTheme] = useState<Theme>("system");
   const [language, setLanguage] = useState<Language>("system");
-  const [maxHistory, setMaxHistory] = useState(1000);
-  const [trayHistory, setTrayHistory] = useState(30);
+  const [maxHistory, setMaxHistory] = useState(DEFAULT_MAX_HISTORY);
+  const [trayHistory, setTrayHistory] = useState(DEFAULT_TRAY_HISTORY);
+  // 输入框草稿：只在失焦 / 回车时提交一次。历史上限保存后后端会立即按新值清理，
+  // 若逐字符保存，输入 500 的中间态「5」会被夹成 50 并触发一次不可恢复的批量删除。
+  const [maxDraft, setMaxDraft] = useState(String(DEFAULT_MAX_HISTORY));
+  const [trayDraft, setTrayDraft] = useState(String(DEFAULT_TRAY_HISTORY));
   const [startup, setStartup] = useState(false);
   const [startupBusy, setStartupBusy] = useState(false);
 
@@ -51,9 +65,17 @@ export function SettingsView() {
           setLang(lg);
         }
         const mh = Number(settings.find((s) => s.key === "max_history")?.value);
-        if (mh > 0) setMaxHistory(mh);
+        if (mh > 0) {
+          const v = clampMaxHistory(mh);
+          setMaxHistory(v);
+          setMaxDraft(String(v));
+        }
         const thc = Number(settings.find((s) => s.key === "tray_history_count")?.value);
-        if (thc > 0) setTrayHistory(thc);
+        if (thc > 0) {
+          const v = clampTrayHistory(thc);
+          setTrayHistory(v);
+          setTrayDraft(String(v));
+        }
       } catch (e) {
         setToast(t("toast.settingsReadFailed", { error: String(e) }));
       }
@@ -88,25 +110,52 @@ export function SettingsView() {
     }
   };
 
-  const onMaxHistoryChange = async (v: number) => {
-    const clamped = Math.max(50, Math.min(50000, v || 1000));
-    setMaxHistory(clamped);
+  // 历史上限 / 托盘条数：只在失焦或回车时提交一次（保存后后端立即清理超量记录，
+  // 逐字符保存会让中间态小值触发误删）。非法输入回退到已保存值，不写库。
+  const commitMaxHistory = async () => {
+    const raw = Number(maxDraft);
+    // 空 / 非数字 / 非正数视为「放弃修改」，回退已保存值，不写库、不触发清理。
+    const next =
+      maxDraft.trim() === "" || !Number.isFinite(raw) || raw <= 0
+        ? maxHistory
+        : clampMaxHistory(raw);
+    setMaxDraft(String(next));
+    if (next === maxHistory) return;
+    setMaxHistory(next);
     try {
-      await api.updateSetting("max_history", String(clamped));
+      await api.updateSetting("max_history", String(next));
       setToast(t("toast.maxHistorySaved"));
     } catch (e) {
+      setMaxDraft(String(maxHistory));
       setToast(t("toast.saveFailed", { error: String(e) }));
     }
   };
 
-  const onTrayHistoryChange = async (v: number) => {
-    const clamped = Math.max(1, Math.min(100, v || 30));
-    setTrayHistory(clamped);
+  const commitTrayHistory = async () => {
+    const raw = Number(trayDraft);
+    const next =
+      trayDraft.trim() === "" || !Number.isFinite(raw) || raw <= 0
+        ? trayHistory
+        : clampTrayHistory(raw);
+    setTrayDraft(String(next));
+    if (next === trayHistory) return;
+    setTrayHistory(next);
     try {
-      await api.updateSetting("tray_history_count", String(clamped));
+      await api.updateSetting("tray_history_count", String(next));
       setToast(t("toast.trayHistorySaved"));
     } catch (e) {
+      setTrayDraft(String(trayHistory));
       setToast(t("toast.saveFailed", { error: String(e) }));
+    }
+  };
+
+  /** 回车 = 提交并失焦；Esc = 放弃草稿并失焦。 */
+  const onNumberKeyDown = (e: KeyboardEvent<HTMLInputElement>, revert: () => void) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      revert();
+      e.currentTarget.blur();
     }
   };
 
@@ -192,10 +241,12 @@ export function SettingsView() {
               <span>{t("settings.maxHistory")}</span>
               <input
                 type="number"
-                min={50}
-                max={50000}
-                value={maxHistory}
-                onChange={(e) => void onMaxHistoryChange(Number(e.target.value))}
+                min={MIN_MAX_HISTORY}
+                max={MAX_MAX_HISTORY}
+                value={maxDraft}
+                onChange={(e) => setMaxDraft(e.target.value)}
+                onBlur={() => void commitMaxHistory()}
+                onKeyDown={(e) => onNumberKeyDown(e, () => setMaxDraft(String(maxHistory)))}
               />
             </div>
             <p className="settings-hint">{t("settings.maxHistoryHint")}</p>
@@ -203,10 +254,12 @@ export function SettingsView() {
               <span>{t("settings.trayHistory")}</span>
               <input
                 type="number"
-                min={1}
-                max={100}
-                value={trayHistory}
-                onChange={(e) => void onTrayHistoryChange(Number(e.target.value))}
+                min={MIN_TRAY_HISTORY}
+                max={MAX_TRAY_HISTORY}
+                value={trayDraft}
+                onChange={(e) => setTrayDraft(e.target.value)}
+                onBlur={() => void commitTrayHistory()}
+                onKeyDown={(e) => onNumberKeyDown(e, () => setTrayDraft(String(trayHistory)))}
               />
             </div>
             <p className="settings-hint">{t("settings.trayHistoryHint")}</p>

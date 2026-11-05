@@ -375,7 +375,7 @@ def build_settings():
     s.append(f'<rect x="740" y="240" width="120" height="34" rx="8" fill="{C["bg"]}" stroke="{C["border"]}"/>')
     s.append(f'<text x="754" y="262" font-size="13" fill="{C["text_primary"]}">1000</text>')
     s.append(
-        f'<text x="50" y="292" font-size="13" fill="{C["text_secondary"]}">超出上限的最旧记录会被自动清理；调整将在下次启动时生效。</text>'
+        f'<text x="50" y="292" font-size="13" fill="{C["text_secondary"]}">超出上限的最旧记录会被自动清理（置顶条目不受影响）；保存后立即生效。</text>'
     )
     row(336, "托盘菜单历史条数")
     s.append(f'<rect x="740" y="318" width="120" height="34" rx="8" fill="{C["bg"]}" stroke="{C["border"]}"/>')

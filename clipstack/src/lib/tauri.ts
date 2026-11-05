@@ -107,6 +107,12 @@ export const onClipboardChanged = (
 ): Promise<UnlistenFn> =>
   listen<HistoryItem>("clipboard-changed", (event) => cb(event.payload));
 
+/** 后端按「历史上限」清理了记录后触发（payload 为删除条数），供前端重载列表。 */
+export const onHistoryChanged = (
+  cb: (deleted: number) => void,
+): Promise<UnlistenFn> =>
+  listen<number>("history-changed", (event) => cb(event.payload));
+
 /** 托盘 / 全局快捷键触发的视图切换（"all" 回到主界面，"settings" 打开设置，"about" 打开关于，"help" 打开帮助）。 */
 export const onShowView = (
   cb: (view: "all" | "settings" | "about" | "help") => void,

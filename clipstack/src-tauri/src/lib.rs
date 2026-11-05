@@ -401,23 +401,40 @@ pub fn run() {
                     .ok();
             }
 
-            // 留存过期清理：每 10 分钟按 `retention_days` 清理超期历史（未置顶）与回收站内容。
-            // days<=0 视为永久保留，线程直接跳过，不触碰库。
+            // 维护线程：每 600s 一轮，先按 `max_history` 清理超出上限的最旧「未置顶」记录，
+            // 再按 `retention_days` 清理超期历史（未置顶）与回收站内容。
+            // ① 两项设置都在每轮开始时实时读库，因此保存后最迟 10 分钟内生效
+            //    （`max_history` 另有 update_setting 中的即时触发，见 commands.rs）。
+            // ② sleep 放在循环末尾：启动后立刻跑一轮，重启后无需再等一个周期。
+            // ③ 容量确有删除时广播 `history-changed`，供前端重载列表，
+            //    否则界面上会残留已被清理的条目。
             {
-                let db_ret = db_state.clone();
+                let db_maint = db_state.clone();
+                let app_maint = app.handle().clone();
                 std::thread::Builder::new()
-                    .name("retention-sweep".into())
+                    .name("maintenance-sweep".into())
                     .spawn(move || {
                         loop {
-                            std::thread::sleep(Duration::from_secs(600));
+                            // ① 容量：始终执行，与留存设置无关。
+                            let deleted = {
+                                let c = db_maint.conn.lock().expect("db lock poisoned");
+                                let max = db::get_max_history(&c);
+                                db::enforce_capacity(&c, max).unwrap_or(0)
+                            };
+                            // 锁已释放后再 emit：监听器内会重新取锁，持锁发送会死锁。
+                            if deleted > 0 {
+                                let _ = app_maint.emit("history-changed", deleted);
+                            }
+                            // ② 留存：days<=0 视为永久保留，直接跳过。
                             let days = {
-                                let c = db_ret.conn.lock().expect("db lock poisoned");
+                                let c = db_maint.conn.lock().expect("db lock poisoned");
                                 db::get_int_setting(&c, "retention_days", 0)
                             };
                             if days > 0 {
-                                let c = db_ret.conn.lock().expect("db lock poisoned");
+                                let c = db_maint.conn.lock().expect("db lock poisoned");
                                 let _ = db::purge_expired(&c, days);
                             }
+                            std::thread::sleep(Duration::from_secs(600));
                         }
                     })
                     .ok();
